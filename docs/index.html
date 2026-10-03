@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#101923" />
+    <meta name="description" content="Общий трекер занятости стендов AAV, ALP, OVD и TVE." />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>Стенды команды</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23101923'/%3E%3Cpath d='M13 45V19h9v26zm14 0V19h9v26zm14 0V19h10v26z' fill='%2357d4c7'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand"><span class="brand-mark" aria-hidden="true">▥</span><span>СТЕНДЫ</span></div>
+        <div class="topbar-right">
+          <span id="connectionStatus" class="connection-status"><span class="connection-dot"></span>Подключение</span>
+          <button id="lockButton" class="quiet-button" type="button" hidden>Сменить код</button>
+        </div>
+      </header>
+
+      <main>
+        <section class="overview" aria-labelledby="pageTitle">
+          <div>
+            <p class="eyebrow">РАБОЧЕЕ ПРОСТРАНСТВО</p>
+            <h1 id="pageTitle">Кто сейчас на стендах</h1>
+            <p class="intro">Занимайте стенд, указывайте план освобождения и оставляйте запрос, если он нужен вам к определённому времени.</p>
+          </div>
+          <div class="summary-card" aria-live="polite">
+            <div class="summary-count"><span id="busyCount">—</span><span class="summary-total">/ 4</span></div>
+            <div class="summary-label">стендов занято</div>
+            <div id="lastUpdated" class="summary-time">Ожидание данных</div>
+          </div>
+        </section>
+
+        <section class="stands-section" aria-label="Состояние стендов">
+          <div id="standGrid" class="stand-grid"></div>
+        </section>
+
+        <section class="history-section" aria-labelledby="historyTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">ЖУРНАЛ</p>
+              <h2 id="historyTitle">История работы</h2>
+            </div>
+            <span class="section-note">Последние 40 сеансов</span>
+          </div>
+          <div id="historyList" class="history-list"></div>
+        </section>
+      </main>
+      <footer>Время отображается в часовом поясе вашего устройства · Данные обновляются каждые 15 секунд</footer>
+    </div>
+
+    <div id="accessScreen" class="access-screen">
+      <form id="accessForm" class="access-card">
+        <div class="access-icon" aria-hidden="true">▥</div>
+        <p class="eyebrow">ДОСТУП КОМАНДЫ</p>
+        <h2>Откройте стенды</h2>
+        <p class="access-copy">Введите общий код, чтобы видеть занятость и вносить изменения.</p>
+        <label for="teamCode">Код команды</label>
+        <input id="teamCode" name="teamCode" type="password" autocomplete="off" spellcheck="false" required />
+        <label class="checkbox-row"><input id="rememberCode" type="checkbox" /> Запомнить на этом устройстве</label>
+        <p id="accessError" class="form-error" role="alert"></p>
+        <button id="accessSubmit" class="primary-button" type="submit">Открыть трекер</button>
+      </form>
+    </div>
+
+    <dialog id="actionDialog" class="action-dialog" aria-labelledby="dialogTitle">
+      <form id="actionForm">
+        <div class="dialog-heading">
+          <div><p id="dialogEyebrow" class="eyebrow"></p><h2 id="dialogTitle"></h2></div>
+          <button id="closeDialog" class="close-button" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <p id="dialogDescription" class="dialog-description"></p>
+        <div id="dialogFields" class="dialog-fields"></div>
+        <p id="dialogError" class="form-error" role="alert"></p>
+        <div class="dialog-actions">
+          <button id="cancelDialog" class="secondary-button" type="button">Отмена</button>
+          <button id="submitDialog" class="primary-button" type="submit"></button>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="./config.js"></script>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
