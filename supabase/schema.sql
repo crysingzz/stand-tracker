@@ -1,5 +1,6 @@
--- Run once in the Supabase SQL Editor. The shared code itself is not stored here.
--- All data tables are private; browsers can call only the five functions below.
+-- Base schema. For a fresh installation, run the two files in migrations/
+-- after this one. The shared code itself is not stored here.
+-- All data tables are private; browsers can call only validated functions.
 
 create schema if not exists private;
 revoke all on schema private from public, anon, authenticated;

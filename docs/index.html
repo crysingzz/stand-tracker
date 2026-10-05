@@ -8,7 +8,7 @@
     <meta name="robots" content="noindex,nofollow" />
     <title>Стенды команды</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23101923'/%3E%3Cpath d='M13 45V19h9v26zm14 0V19h9v26zm14 0V19h10v26z' fill='%2357d4c7'/%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=20261005-2" />
   </head>
   <body>
     <div class="app-shell">
@@ -25,7 +25,7 @@
           <div>
             <p class="eyebrow">РАБОЧЕЕ ПРОСТРАНСТВО</p>
             <h1 id="pageTitle">Кто сейчас на стендах</h1>
-            <p class="intro">Занимайте стенд, указывайте план освобождения и оставляйте запрос, если он нужен вам к определённому времени.</p>
+            <p class="intro">Занимайте стенд с приоритетом задачи, указывайте план освобождения и оставляйте запрос, если он нужен вам к определённому времени.</p>
           </div>
           <div class="summary-card" aria-live="polite">
             <div class="summary-count"><span id="busyCount">—</span><span class="summary-total">/ 4</span></div>
@@ -64,6 +64,17 @@
         <p id="accessError" class="form-error" role="alert"></p>
         <button id="accessSubmit" class="primary-button" type="submit">Открыть трекер</button>
       </form>
+      <div id="telegramAccess" class="access-card" hidden>
+        <div class="access-icon" aria-hidden="true">▥</div>
+        <p class="eyebrow">ЛИЧНЫЙ ПРОФИЛЬ</p>
+        <h2>Войти через Telegram</h2>
+        <p class="access-copy">Войдите своим Telegram-аккаунтом из списка команды. Имя в действиях подставится автоматически.</p>
+        <div id="telegramWidget" class="telegram-widget"></div>
+        <p id="telegramError" class="form-error" role="alert"></p>
+        <p class="telegram-hint">Для уведомлений откройте бота и нажмите Start.</p>
+        <a id="telegramBotLink" class="secondary-button telegram-bot-link" target="_blank" rel="noopener noreferrer">Открыть бота</a>
+        <button id="legacyAccessButton" class="text-button" type="button">Войти по коду команды</button>
+      </div>
     </div>
 
     <dialog id="actionDialog" class="action-dialog" aria-labelledby="dialogTitle">
@@ -84,6 +95,6 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script src="./config.js?v=20261005-1"></script>
-    <script type="module" src="./app.js"></script>
+    <script type="module" src="./app.js?v=20261005-2"></script>
   </body>
 </html>
