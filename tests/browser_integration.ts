@@ -79,7 +79,8 @@ try {
 
   await page.locator("#beginLogin").click();
   await page.locator("#telegramBotLink").waitFor({ state: "visible" });
-  assert((await page.locator("#telegramBotLink").getAttribute("href"))?.includes("?start="), "Deep link must be present");
+  assert((await page.locator("#telegramBotLink").getAttribute("href"))?.startsWith("tg://resolve?domain=ouroboros_stands_tracker_bot&start="), "Link must open the Telegram app directly");
+  assert((await page.locator("#manualCommand").textContent())?.startsWith("/start "), "Manual fallback command must be present");
   await page.locator("#loginCode").fill("87654321");
   await page.locator("#submitCode").click();
   await page.getByText("Неверный код").waitFor();

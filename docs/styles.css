@@ -105,6 +105,10 @@ footer { border-top: 1px solid #283743; color: #728a93; font-size: .78rem; line-
 .code-step form { margin-top: 17px; }
 .code-step input { letter-spacing: .18em; font-variant-numeric: tabular-nums; }
 .code-step .telegram-bot-link { width: 100%; text-align: center; }
+.telegram-manual { margin: 15px 0 7px; color: #aec1c7; font-size: .8rem; line-height: 1.4; }
+.telegram-command { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border: 1px solid #3e5661; border-radius: 9px; background: #10202a; }
+.telegram-command code { min-width: 0; flex: 1; overflow-wrap: anywhere; color: #d2e8e5; font-size: .75rem; user-select: all; }
+.telegram-command button { flex: none; }
 .telegram-hint { color: #aec1c7; font-size: .86rem; line-height: 1.5; }
 .telegram-bot-link { display: inline-block; text-decoration: none; }
 .form-error { min-height: 1.2em; color: #ffaaa2; font-size: .85rem; line-height: 1.4; margin: 10px 0 0; }

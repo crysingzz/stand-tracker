@@ -103,6 +103,8 @@ function showLogin(message = "Войдите через Telegram.") {
   $("#telegramStatus").textContent = message;
   $("#codeStep").hidden = true;
   $("#telegramBotLink").hidden = true;
+  $("#telegramBotLink").removeAttribute("href");
+  $("#manualCommand").textContent = "";
   $("#loginCode").value = "";
   $("#beginLogin").hidden = !botUsername;
   $("#telegramRetry").hidden = true;
@@ -315,14 +317,16 @@ async function beginLogin() {
         !/^[A-Za-z0-9_-]{43}$/.test(challenge.browserToken) ||
         challenge.startLink !== `https://t.me/${botUsername}?start=${challenge.startToken}`) throw new Error("Сервер вернул неверную ссылку");
     loginChallenge = challenge;
-    $("#telegramBotLink").href = challenge.startLink;
+    $("#telegramBotLink").href = `tg://resolve?domain=${botUsername}&start=${challenge.startToken}`;
     $("#telegramBotLink").hidden = false;
+    $("#manualBotName").textContent = `@${botUsername}`;
+    $("#manualCommand").textContent = `/start ${challenge.startToken}`;
     $("#codeStep").hidden = false;
     $("#telegramRetry").hidden = false;
     $("#telegramRetry").textContent = "Запросить новую ссылку";
     $("#beginLogin").hidden = true;
     $("#loginCode").value = "";
-    $("#telegramStatus").textContent = "Откройте бота по ссылке, нажмите Start и введите код из личного сообщения.";
+    $("#telegramStatus").textContent = "Откройте приложение Telegram, нажмите Start в чате бота и введите код из личного сообщения.";
   } catch (error) {
     $("#telegramStatus").textContent = "Не удалось подготовить вход.";
     $("#telegramError").textContent = errorMessage(error);
@@ -332,6 +336,14 @@ async function beginLogin() {
 }
 
 $("#beginLogin").addEventListener("click", beginLogin);
+$("#copyCommand").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText($("#manualCommand").textContent);
+    showToast("Команда скопирована. Отправьте её в личный чат бота.");
+  } catch {
+    showToast("Не удалось скопировать автоматически. Выделите команду вручную.");
+  }
+});
 $("#codeForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!loginChallenge || signingIn) return;
@@ -349,6 +361,7 @@ $("#codeForm").addEventListener("submit", async (event) => {
     sessionStorage.setItem("stand-tracker-session", sessionToken);
     loginChallenge = null;
     $("#loginCode").value = "";
+    $("#manualCommand").textContent = "";
     try {
       applyState(await telegramApi("state"));
       showTracker();
