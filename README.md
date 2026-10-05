@@ -27,7 +27,7 @@
 ## Развёртывание своей копии с Supabase
 
 1. Создайте бесплатный проект на [supabase.com](https://supabase.com/dashboard).
-2. Откройте **SQL Editor** и выполните целиком [`supabase/schema.sql`](supabase/schema.sql), затем по порядку [`20261005_priority_and_members.sql`](supabase/migrations/20261005_priority_and_members.sql) и [`20261005_telegram_member_api.sql`](supabase/migrations/20261005_telegram_member_api.sql). Они не удаляют существующие сеансы.
+2. Откройте **SQL Editor** и выполните целиком [`supabase/schema.sql`](supabase/schema.sql), затем по порядку [`20261005_priority_and_members.sql`](supabase/migrations/20261005_priority_and_members.sql), [`20261005_telegram_member_api.sql`](supabase/migrations/20261005_telegram_member_api.sql) и [`20261005_member_indexes.sql`](supabase/migrations/20261005_member_indexes.sql). Они не удаляют существующие сеансы.
 3. В **Project Settings → API Keys** возьмите Project URL и *publishable key* вида `sb_publishable_…`.
 4. Заполните только эти два значения в [`docs/config.js`](docs/config.js). Секретный код команды передаётся участникам отдельно.
 5. Откройте сайт, введите код команды и проверьте занятие и освобождение AAV. Затем откройте сайт на другом устройстве и убедитесь, что изменение видно там.
