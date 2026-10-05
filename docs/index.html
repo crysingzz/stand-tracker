@@ -9,7 +9,8 @@
     <meta name="referrer" content="no-referrer" />
     <title>Стенды команды</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23101923'/%3E%3Cpath d='M13 45V19h9v26zm14 0V19h9v26zm14 0V19h10v26z' fill='%2357d4c7'/%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="./styles.css?v=20261005-5" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src https://kegynudaiydthomudwzd.supabase.co http://localhost:8765 http://127.0.0.1:8765; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" />
+    <link rel="stylesheet" href="./styles.css?v=20261005-6" />
   </head>
   <body>
     <div class="app-shell">
@@ -60,13 +61,20 @@
         <div class="access-icon" aria-hidden="true">▥</div>
         <p class="eyebrow">ЛИЧНЫЙ ПРОФИЛЬ</p>
         <h2>Войти через Telegram</h2>
-        <p class="access-copy">Войдите своим Telegram-аккаунтом из списка команды. Имя в действиях подставится автоматически.</p>
+        <p class="access-copy">Получите одноразовый код в личном чате с ботом. Telegram в браузере открывать не нужно.</p>
         <p id="telegramStatus" class="telegram-status" role="status">Подключаем вход…</p>
-        <div id="telegramWidget" class="telegram-widget"></div>
+        <button id="beginLogin" class="primary-button" type="button" hidden>Получить код в Telegram</button>
+        <div id="codeStep" class="code-step" hidden>
+          <a id="telegramBotLink" class="secondary-button telegram-bot-link" target="_blank" rel="noopener noreferrer" hidden>Открыть бота</a>
+          <form id="codeForm" autocomplete="off">
+            <label for="loginCode">Код из чата с ботом</label>
+            <input id="loginCode" name="code" type="text" inputmode="numeric" pattern="[0-9]{8}" minlength="8" maxlength="8" autocomplete="one-time-code" placeholder="8 цифр" required />
+            <button id="submitCode" class="primary-button" type="submit">Войти</button>
+          </form>
+        </div>
         <p id="telegramError" class="form-error" role="alert"></p>
-        <button id="telegramRetry" class="secondary-button" type="button" hidden>Повторить вход</button>
-        <p class="telegram-hint">Для уведомлений откройте бота и нажмите Start.</p>
-        <a id="telegramBotLink" class="secondary-button telegram-bot-link" target="_blank" rel="noopener noreferrer" hidden>Открыть бота</a>
+        <button id="telegramRetry" class="secondary-button" type="button" hidden>Запросить новую ссылку</button>
+        <p class="telegram-hint">Код действует 5 минут и может быть использован только один раз.</p>
       </div>
     </div>
 
@@ -88,6 +96,6 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script src="./config.js?v=20261005-3"></script>
-    <script type="module" src="./app.js?v=20261005-5"></script>
+    <script type="module" src="./app.js?v=20261005-6"></script>
   </body>
 </html>

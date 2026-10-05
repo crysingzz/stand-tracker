@@ -1,14 +1,14 @@
-// Telegram-authenticated API. Set TELEGRAM_BOT_TOKEN in Supabase Edge Function
-// secrets; never put it in the GitHub Pages files or the repository.
+// Telegram bot-code API. The bot token stays in Edge Function secrets; browsers
+// receive only one-time challenges and revocable opaque site sessions.
 const allowedOrigins = new Set([
   "https://crysingzz.github.io",
   "http://localhost:8765",
   "http://127.0.0.1:8765",
 ]);
 const MAX_BODY_BYTES = 16_384;
-// All Telegram proofs issued before this UTC time were invalidated on 2026-10-05.
-const AUTH_NOT_BEFORE = 1_791_203_070; // 2026-10-05 12:24:30 UTC
+const MAX_WEBHOOK_BYTES = 65_536;
 let cachedBot: { username: string; until: number } | null = null;
+let webhookReadyUntil = 0;
 
 class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -16,7 +16,7 @@ class ApiError extends Error {
 
 function cors(origin: string | null): Record<string, string> {
   return origin && allowedOrigins.has(origin)
-    ? { "Access-Control-Allow-Origin": origin, "Vary": "Origin", "Access-Control-Allow-Headers": "content-type, apikey", "Access-Control-Allow-Methods": "GET, POST, OPTIONS" }
+    ? { "Access-Control-Allow-Origin": origin, "Vary": "Origin", "Access-Control-Allow-Headers": "content-type, authorization", "Access-Control-Allow-Methods": "GET, POST, OPTIONS" }
     : {};
 }
 
@@ -35,7 +35,7 @@ function serviceKey(): string {
   return key;
 }
 
-async function rpc(name: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
+async function rpc<T = Record<string, unknown>>(name: string, params: Record<string, unknown>): Promise<T> {
   const url = Deno.env.get("SUPABASE_URL");
   if (!url) throw new ApiError(503, "Supabase не подключён");
   let response: Response;
@@ -49,20 +49,22 @@ async function rpc(name: string, params: Record<string, unknown>): Promise<Recor
   } catch {
     throw new ApiError(503, "База данных временно недоступна");
   }
-  const body = await response.json().catch(() => null);
+  const raw = await response.text();
+  let body: unknown;
+  try { body = JSON.parse(raw); } catch { throw new ApiError(502, "Неверный ответ базы данных"); }
   if (!response.ok) {
     if (response.status >= 500) throw new ApiError(503, "База данных временно недоступна");
-    throw new ApiError(400, String(body?.message || "Действие не удалось"));
+    const message = body && typeof body === "object" && "message" in body ? String(body.message) : "Действие не удалось";
+    throw new ApiError(400, message);
   }
-  if (!body || typeof body !== "object" || Array.isArray(body)) throw new ApiError(502, "Неверный ответ базы данных");
-  return body;
+  return body as T;
 }
 
 function botToken(): string {
   return Deno.env.get("TELEGRAM_BOT_TOKEN")?.trim() || "";
 }
 
-async function telegram(method: string, payload: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+async function telegram(method: string, payload: Record<string, unknown> = {}): Promise<unknown> {
   let response: Response;
   try {
     response = await fetch(`https://api.telegram.org/bot${botToken()}/${method}`, {
@@ -91,36 +93,78 @@ function sameHex(left: string, right: string): boolean {
   return different === 0;
 }
 
-async function verifyTelegramAuth(value: unknown): Promise<{ id: string; username: string | null }> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new ApiError(401, "Войдите через Telegram");
-  const auth = value as Record<string, unknown>;
-  const id = String(auth.id ?? "");
-  const username = auth.username == null || auth.username === "" ? null : String(auth.username);
-  const authDate = Number(auth.auth_date);
-  const hash = String(auth.hash ?? "").toLowerCase();
-  const now = Math.floor(Date.now() / 1000);
-  if (!/^[1-9]\d{0,15}$/.test(id) || !Number.isSafeInteger(Number(id)) ||
-      (username !== null && !/^[A-Za-z0-9_]{5,32}$/.test(username)) ||
-      !Number.isInteger(authDate) || authDate < AUTH_NOT_BEFORE || authDate > now + 60 || now - authDate > 86400 ||
-      !/^[a-f0-9]{64}$/.test(hash)) {
-    throw new ApiError(401, "Подтверждение Telegram недействительно или устарело");
-  }
-
-  const checkString = Object.entries(auth)
-    .filter(([key]) => key !== "hash")
-    .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
-    .map(([key, item]) => `${key}=${String(item)}`)
-    .join("\n");
-  const secret = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(botToken()));
-  const hmacKey = await crypto.subtle.importKey("raw", secret, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const expected = hex(await crypto.subtle.sign("HMAC", hmacKey, new TextEncoder().encode(checkString)));
-  if (!sameHex(expected, hash)) throw new ApiError(401, "Подтверждение Telegram не прошло проверку");
-  return { id, username };
+async function sha256Hex(value: string): Promise<string> {
+  return hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
 }
 
-async function readBody(request: Request): Promise<Record<string, unknown>> {
+async function hmacHex(key: string, value: string): Promise<string> {
+  const cryptoKey = await crypto.subtle.importKey("raw", new TextEncoder().encode(key), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return hex(await crypto.subtle.sign("HMAC", cryptoKey, new TextEncoder().encode(value)));
+}
+
+function randomToken(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function randomCode(): string {
+  const range = 100_000_000;
+  const ceiling = Math.floor(0x1_0000_0000 / range) * range;
+  let value: number;
+  do { value = crypto.getRandomValues(new Uint32Array(1))[0]; } while (value >= ceiling);
+  return String(value % range).padStart(8, "0");
+}
+
+function tokenValue(value: unknown): string {
+  const token = String(value ?? "");
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new ApiError(400, "Неверный запрос на вход");
+  return token;
+}
+
+async function botInfo(): Promise<{ username: string }> {
+  if (cachedBot && cachedBot.until > Date.now()) return cachedBot;
+  const result = await telegram("getMe");
+  if (!result || typeof result !== "object" || !("username" in result) ||
+      typeof result.username !== "string" || !/^[A-Za-z0-9_]{5,32}$/.test(result.username)) {
+    throw new ApiError(503, "Telegram-бот недоступен");
+  }
+  cachedBot = { username: result.username, until: Date.now() + 300_000 };
+  return cachedBot;
+}
+
+async function webhookSecret(): Promise<string> {
+  return sha256Hex(`stand-tracker-webhook-v1:${botToken()}`);
+}
+
+async function ensureWebhook(): Promise<void> {
+  if (webhookReadyUntil > Date.now()) return;
+  const base = Deno.env.get("SUPABASE_URL");
+  if (!base || !base.startsWith("https://")) throw new ApiError(503, "Сервер не подключён");
+  const result = await telegram("setWebhook", {
+    url: `${base}/functions/v1/stand-tracker-api/telegram-webhook`,
+    secret_token: await webhookSecret(),
+    allowed_updates: ["message"],
+    max_connections: 10,
+    drop_pending_updates: false,
+  });
+  if (result !== true) throw new ApiError(503, "Не удалось подключить Telegram-бота");
+  webhookReadyUntil = Date.now() + 600_000;
+}
+
+async function sessionMember(request: Request): Promise<{ id: number; name: string; username: string; telegram_user_id: string }> {
+  const header = request.headers.get("Authorization") || "";
+  const match = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(header);
+  if (!match) throw new ApiError(401, "Войдите через Telegram-бота");
+  const member = await rpc<Record<string, unknown> | null>("bot_session_resolve", { p_token_hash: await sha256Hex(match[1]) });
+  if (!member || !Number.isSafeInteger(Number(member.id)) || !member.telegram_user_id) {
+    throw new ApiError(401, "Сеанс истёк. Войдите через бота снова");
+  }
+  return { id: Number(member.id), name: String(member.name), username: String(member.username), telegram_user_id: String(member.telegram_user_id) };
+}
+
+async function readBody(request: Request, maxBytes = MAX_BODY_BYTES): Promise<Record<string, unknown>> {
   const length = Number(request.headers.get("content-length") || 0);
-  if (!Number.isFinite(length) || length > MAX_BODY_BYTES) throw new ApiError(413, "Слишком большой запрос");
+  if (!Number.isFinite(length) || length > maxBytes) throw new ApiError(413, "Слишком большой запрос");
   const reader = request.body?.getReader();
   if (!reader) throw new ApiError(400, "Пустой запрос");
   const chunks: Uint8Array[] = [];
@@ -129,7 +173,7 @@ async function readBody(request: Request): Promise<Record<string, unknown>> {
     const { done, value } = await reader.read();
     if (done) break;
     size += value.byteLength;
-    if (size > MAX_BODY_BYTES) {
+    if (size > maxBytes) {
       await reader.cancel();
       throw new ApiError(413, "Слишком большой запрос");
     }
@@ -180,6 +224,51 @@ function moscowTime(value: string): string {
   }).format(new Date(value));
 }
 
+async function handleTelegramWebhook(request: Request, origin: string | null): Promise<Response> {
+  const supplied = request.headers.get("X-Telegram-Bot-Api-Secret-Token") || "";
+  if (!sameHex(supplied, await webhookSecret())) throw new ApiError(403, "Недопустимый запрос");
+  const update = await readBody(request, MAX_WEBHOOK_BYTES);
+  const message = update.message;
+  if (!message || typeof message !== "object" || Array.isArray(message)) return json({ ok: true }, 200, origin);
+  const item = message as Record<string, unknown>;
+  const sender = item.from;
+  const chat = item.chat;
+  if (!sender || typeof sender !== "object" || !chat || typeof chat !== "object") return json({ ok: true }, 200, origin);
+  const from = sender as Record<string, unknown>;
+  const conversation = chat as Record<string, unknown>;
+  if (conversation.type !== "private" || !Number.isSafeInteger(from.id) || from.id !== conversation.id) {
+    return json({ ok: true }, 200, origin);
+  }
+  const command = typeof item.text === "string" ? /^\/start(?:@\w+)?(?:\s+([A-Za-z0-9_-]{43}))?\s*$/.exec(item.text) : null;
+  if (!command) return json({ ok: true }, 200, origin);
+  if (!command[1]) {
+    await telegram("sendMessage", { chat_id: from.id, text: "Чтобы войти в трекер стендов, откройте сайт и нажмите «Получить код в Telegram». Затем перейдите по выданной ссылке." });
+    return json({ ok: true }, 200, origin);
+  }
+  const startHash = await sha256Hex(command[1]);
+  const code = randomCode();
+  const codeHash = await hmacHex(botToken(), `${startHash}:${code}`);
+  let result: Record<string, unknown>;
+  try {
+    result = await rpc("bot_login_start", {
+      p_start_hash: startHash,
+      p_telegram_user_id: from.id,
+      p_telegram_username: typeof from.username === "string" ? from.username : null,
+      p_code_hash: codeHash,
+    });
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 400) throw error;
+    await telegram("sendMessage", { chat_id: from.id, text: "Этот Telegram-аккаунт не привязан к профилю команды. Попросите администратора проверить ваш @username." });
+    return json({ ok: true }, 200, origin);
+  }
+  if (result.status === "ready") {
+    await telegram("sendMessage", { chat_id: from.id, text: `Код для входа в трекер стендов: ${code}\n\nВведите его на сайте в течение 5 минут. Никому не пересылайте код.` });
+  } else {
+    await telegram("sendMessage", { chat_id: from.id, text: "Ссылка на вход устарела или уже использована. Вернитесь на сайт и запросите новую." });
+  }
+  return json({ ok: true }, 200, origin);
+}
+
 Deno.serve(async (request: Request) => {
   const origin = request.headers.get("Origin");
   if (origin && !allowedOrigins.has(origin)) return json({ message: "Источник не разрешён" }, 403, origin);
@@ -187,39 +276,66 @@ Deno.serve(async (request: Request) => {
 
   const route = new URL(request.url).pathname.split("/").filter(Boolean).at(-1);
   try {
+    if (!botToken()) throw new ApiError(503, "Telegram-бот ещё не подключён администратором");
     if (request.method === "GET" && route === "config") {
-      if (!botToken()) return json({ enabled: false }, 200, origin);
-      if (cachedBot && cachedBot.until > Date.now()) return json({ enabled: true, botUsername: cachedBot.username }, 200, origin);
       try {
-        const bot = await telegram("getMe");
-        if (typeof bot.username !== "string" || !/^[A-Za-z0-9_]{5,32}$/.test(bot.username)) throw new Error("Invalid bot username");
-        cachedBot = { username: bot.username, until: Date.now() + 300_000 };
+        const bot = await botInfo();
+        await ensureWebhook();
         return json({ enabled: true, botUsername: bot.username }, 200, origin);
       } catch {
         return json({ enabled: false }, 200, origin);
       }
     }
-    if (!botToken()) throw new ApiError(503, "Telegram-бот ещё не подключён администратором");
     if (request.method !== "POST") throw new ApiError(405, "Метод не поддерживается");
+    if (route === "telegram-webhook") return await handleTelegramWebhook(request, origin);
     const body = await readBody(request);
-    const identity = await verifyTelegramAuth(body.auth);
-    const member = await rpc("telegram_resolve_member", {
-      p_telegram_user_id: identity.id,
-      p_telegram_username: identity.username,
-    });
-    const memberId = Number(member.id);
-    if (!Number.isSafeInteger(memberId)) throw new ApiError(502, "Неверный профиль");
-
-    if (route === "auth") {
-      let notificationWarning: string | null = null;
-      if (member.newly_linked) {
-        notificationWarning = await sendNotice(identity.id, `Профиль ${member.name} подключён к трекеру стендов. Теперь вы будете получать связанные с вами уведомления.`);
+    if (route === "begin-login") {
+      await ensureWebhook();
+      const bot = await botInfo();
+      const startToken = randomToken();
+      const browserToken = randomToken();
+      const challenge = await rpc<Record<string, unknown>>("bot_login_begin", {
+        p_start_hash: await sha256Hex(startToken), p_browser_hash: await sha256Hex(browserToken),
+      });
+      return json({ startToken, browserToken, startLink: `https://t.me/${bot.username}?start=${startToken}`, expiresAt: challenge.expires_at }, 200, origin);
+    }
+    if (route === "complete-login") {
+      const startToken = tokenValue(body.startToken);
+      const browserToken = tokenValue(body.browserToken);
+      const code = String(body.code ?? "");
+      if (!/^\d{8}$/.test(code)) throw new ApiError(400, "Введите восьмизначный код из чата с ботом");
+      const startHash = await sha256Hex(startToken);
+      const sessionToken = randomToken();
+      const result = await rpc<Record<string, unknown>>("bot_login_complete", {
+        p_start_hash: startHash,
+        p_browser_hash: await sha256Hex(browserToken),
+        p_code_hash: await hmacHex(botToken(), `${startHash}:${code}`),
+        p_session_hash: await sha256Hex(sessionToken),
+      });
+      if (result.status !== "ok") {
+        const failures: Record<string, [number, string]> = {
+          pending: [409, "Сначала откройте бота по ссылке и получите код"],
+          wrong: [400, `Неверный код. Осталось попыток: ${Number(result.remaining) || 0}`],
+          locked: [429, "Слишком много неверных кодов. Запросите новую ссылку"],
+          expired: [410, "Код устарел. Запросите новую ссылку"],
+          invalid: [400, "Неверный запрос на вход"],
+        };
+        const failure = failures[String(result.status)] || [400, "Не удалось войти"];
+        throw new ApiError(failure[0], failure[1]);
       }
-      return json({ profile: { id: memberId, name: member.name, username: member.username }, notificationWarning }, 200, origin);
+      return json({ sessionToken, profile: result.profile, expiresAt: result.expires_at }, 200, origin);
+    }
+    const member = await sessionMember(request);
+    const memberId = member.id;
+    if (route === "logout") {
+      const token = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(request.headers.get("Authorization") || "")?.[1];
+      if (!token) throw new ApiError(401, "Войдите через Telegram-бота");
+      await rpc<boolean>("bot_session_revoke", { p_token_hash: await sha256Hex(token) });
+      return json({ ok: true }, 200, origin);
     }
     if (route === "state") return json(await rpc("member_state", { p_member_id: memberId }), 200, origin);
     if (route === "test-notification") {
-      const warning = await sendNotice(identity.id, `Проверка уведомлений трекера стендов для профиля ${member.name}.`);
+      const warning = await sendNotice(member.telegram_user_id, `Проверка уведомлений трекера стендов для профиля ${member.name}.`);
       return json({ delivered: !warning, notificationWarning: warning }, 200, origin);
     }
 
