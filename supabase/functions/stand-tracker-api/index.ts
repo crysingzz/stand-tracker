@@ -76,12 +76,16 @@ async function telegram(method: string, payload: Record<string, unknown> = {}): 
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(8_000),
     });
-  } catch {
+  } catch (error) {
     // Never log a fetch error: its URL can contain the bot token.
+    console.error("Telegram transport failed", method, error instanceof Error ? error.name : "unknown");
     throw new ApiError(503, "Telegram временно недоступен");
   }
   const result = await response.json().catch(() => null);
-  if (!response.ok || !result?.ok) throw new ApiError(503, "Telegram временно недоступен");
+  if (!response.ok || !result?.ok) {
+    console.error("Telegram API failed", method, response.status, Number(result?.error_code) || 0);
+    throw new ApiError(503, "Telegram временно недоступен");
+  }
   return result.result;
 }
 
@@ -143,8 +147,17 @@ async function ensureWebhook(): Promise<void> {
   if (webhookReadyUntil > Date.now()) return;
   const base = Deno.env.get("SUPABASE_URL");
   if (!base || !base.startsWith("https://")) throw new ApiError(503, "Сервер не подключён");
+  // The URL changes when the token rotates, so the secret header is renewed too.
+  // This fingerprint is not a credential; the token itself never leaves secrets.
+  const tokenVersion = (await sha256Hex(botToken())).slice(0, 16);
+  const url = `${base}/functions/v1/stand-tracker-api/telegram-webhook?v=${tokenVersion}`;
+  const current = await telegram("getWebhookInfo") as { url?: unknown };
+  if (current?.url === url) {
+    webhookReadyUntil = Date.now() + 600_000;
+    return;
+  }
   const result = await telegram("setWebhook", {
-    url: `${base}/functions/v1/stand-tracker-api/telegram-webhook`,
+    url,
     secret_token: await webhookSecret(),
     allowed_updates: ["message"],
     max_connections: 10,
@@ -293,7 +306,6 @@ Deno.serve(async (request: Request) => {
     if (route === "telegram-webhook") return await handleTelegramWebhook(request, origin);
     const body = await readBody(request);
     if (route === "begin-login") {
-      await ensureWebhook();
       const bot = await botInfo();
       const startToken = randomToken();
       const browserToken = randomToken();
