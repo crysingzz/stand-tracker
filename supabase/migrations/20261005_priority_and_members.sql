@@ -79,7 +79,6 @@ end;
 $$;
 
 revoke all on function private.claim_stand_with_priority(text, text, text, text, timestamptz, text) from public, anon, authenticated;
-grant execute on function private.claim_stand_with_priority(text, text, text, text, timestamptz, text) to anon, authenticated;
 
 create or replace function public.claim_stand_with_priority(
   p_code text, p_stand text, p_name text,
@@ -90,4 +89,4 @@ set search_path = pg_catalog, private
 as $$ select private.claim_stand_with_priority(p_code, p_stand, p_name, p_purpose, p_planned_end, p_priority) $$;
 
 revoke all on function public.claim_stand_with_priority(text, text, text, text, timestamptz, text) from public;
-grant execute on function public.claim_stand_with_priority(text, text, text, text, timestamptz, text) to anon, authenticated;
+revoke all on function public.claim_stand_with_priority(text, text, text, text, timestamptz, text) from anon, authenticated;

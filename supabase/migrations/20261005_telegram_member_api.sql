@@ -1,5 +1,4 @@
--- Server-only API for Telegram-verified members. Existing shared-code API stays
--- available during the transition; revoke it after Telegram onboarding.
+-- Server-only API for Telegram-verified members.
 alter table private.sessions
   add column if not exists occupant_member_id bigint references private.members(id);
 alter table private.release_requests

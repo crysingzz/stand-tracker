@@ -6,9 +6,10 @@
     <meta name="theme-color" content="#101923" />
     <meta name="description" content="Общий трекер занятости стендов AAV, ALP, OVD и TVE." />
     <meta name="robots" content="noindex,nofollow" />
+    <meta name="referrer" content="no-referrer" />
     <title>Стенды команды</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23101923'/%3E%3Cpath d='M13 45V19h9v26zm14 0V19h9v26zm14 0V19h10v26z' fill='%2357d4c7'/%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="./styles.css?v=20261005-2" />
+    <link rel="stylesheet" href="./styles.css?v=20261005-3" />
   </head>
   <body>
     <div class="app-shell">
@@ -16,7 +17,9 @@
         <div class="brand"><span class="brand-mark" aria-hidden="true">▥</span><span>СТЕНДЫ</span></div>
         <div class="topbar-right">
           <span id="connectionStatus" class="connection-status"><span class="connection-dot"></span>Подключение</span>
-          <button id="lockButton" class="quiet-button" type="button" hidden>Сменить код</button>
+          <span id="accountName" class="account-name" hidden></span>
+          <button id="testNotification" class="quiet-button" type="button" hidden>Проверить Telegram</button>
+          <button id="lockButton" class="quiet-button" type="button" hidden>Выйти</button>
         </div>
       </header>
 
@@ -53,27 +56,17 @@
     </div>
 
     <div id="accessScreen" class="access-screen">
-      <form id="accessForm" class="access-card">
-        <div class="access-icon" aria-hidden="true">▥</div>
-        <p class="eyebrow">ДОСТУП КОМАНДЫ</p>
-        <h2>Откройте стенды</h2>
-        <p class="access-copy">Введите общий код, чтобы видеть занятость и вносить изменения.</p>
-        <label for="teamCode">Код команды</label>
-        <input id="teamCode" name="teamCode" type="password" autocomplete="off" spellcheck="false" required />
-        <label class="checkbox-row"><input id="rememberCode" type="checkbox" /> Запомнить на этом устройстве</label>
-        <p id="accessError" class="form-error" role="alert"></p>
-        <button id="accessSubmit" class="primary-button" type="submit">Открыть трекер</button>
-      </form>
-      <div id="telegramAccess" class="access-card" hidden>
+      <div id="telegramAccess" class="access-card">
         <div class="access-icon" aria-hidden="true">▥</div>
         <p class="eyebrow">ЛИЧНЫЙ ПРОФИЛЬ</p>
         <h2>Войти через Telegram</h2>
         <p class="access-copy">Войдите своим Telegram-аккаунтом из списка команды. Имя в действиях подставится автоматически.</p>
+        <p id="telegramStatus" class="telegram-status" role="status">Подключаем вход…</p>
         <div id="telegramWidget" class="telegram-widget"></div>
         <p id="telegramError" class="form-error" role="alert"></p>
+        <button id="telegramRetry" class="secondary-button" type="button" hidden>Повторить вход</button>
         <p class="telegram-hint">Для уведомлений откройте бота и нажмите Start.</p>
-        <a id="telegramBotLink" class="secondary-button telegram-bot-link" target="_blank" rel="noopener noreferrer">Открыть бота</a>
-        <button id="legacyAccessButton" class="text-button" type="button">Войти по коду команды</button>
+        <a id="telegramBotLink" class="secondary-button telegram-bot-link" target="_blank" rel="noopener noreferrer" hidden>Открыть бота</a>
       </div>
     </div>
 
@@ -94,7 +87,7 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <script src="./config.js?v=20261005-1"></script>
-    <script type="module" src="./app.js?v=20261005-2"></script>
+    <script src="./config.js?v=20261005-3"></script>
+    <script type="module" src="./app.js?v=20261005-3"></script>
   </body>
 </html>

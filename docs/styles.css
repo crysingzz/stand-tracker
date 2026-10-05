@@ -11,6 +11,7 @@
 body { margin: 0; min-width: 320px; background: #101923; }
 button, input, textarea, select { font: inherit; }
 button { cursor: pointer; }
+[hidden] { display: none !important; }
 button:disabled { cursor: wait; opacity: .58; }
 button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid #73e6d8; outline-offset: 3px; }
 
@@ -19,6 +20,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .brand { display: flex; align-items: center; gap: 11px; color: #dce7e9; font-size: .91rem; font-weight: 800; letter-spacing: .18em; }
 .brand-mark { display: grid; place-items: center; height: 34px; width: 34px; border: 1px solid #5fd7ca; border-radius: 10px; color: #73e6d8; font-size: 1.28rem; letter-spacing: 0; }
 .topbar-right { display: flex; align-items: center; gap: 18px; }
+.account-name { color: #dceeed; font-size: .86rem; }
+.telegram-status { color: #c9dddc; line-height: 1.5; margin: 8px 0 14px; }
 .connection-status { display: inline-flex; align-items: center; gap: 8px; color: #a9bac1; font-size: .86rem; white-space: nowrap; }
 .connection-dot { height: 7px; width: 7px; border-radius: 50%; background: #e4b762; box-shadow: 0 0 0 3px #e4b7621f; }
 .connection-status.online .connection-dot { background: #68d6b5; box-shadow: 0 0 0 3px #68d6b520; }
@@ -101,7 +104,6 @@ footer { border-top: 1px solid #283743; color: #728a93; font-size: .78rem; line-
 .telegram-widget { min-height: 50px; margin: 4px 0 14px; }
 .telegram-hint { color: #aec1c7; font-size: .86rem; line-height: 1.5; }
 .telegram-bot-link { display: inline-block; text-decoration: none; }
-#legacyAccessButton { display: block; margin-top: 20px; padding-left: 0; }
 .form-error { min-height: 1.2em; color: #ffaaa2; font-size: .85rem; line-height: 1.4; margin: 10px 0 0; }
 
 .action-dialog { width: min(92vw, 510px); max-height: min(92vh, 750px); border: 1px solid #526872; border-radius: 20px; background: #1b2a35; color: #eef5f6; padding: 26px; box-shadow: 0 30px 80px #0009; }

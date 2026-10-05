@@ -5,6 +5,8 @@ const allowedOrigins = new Set([
   "http://localhost:8765",
   "http://127.0.0.1:8765",
 ]);
+const MAX_BODY_BYTES = 16_384;
+let cachedBot: { username: string; until: number } | null = null;
 
 class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -53,13 +55,19 @@ function botToken(): string {
 }
 
 async function telegram(method: string, payload: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
-  const response = await fetch(`https://api.telegram.org/bot${botToken()}/${method}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`https://api.telegram.org/bot${botToken()}/${method}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    // Never log a fetch error: its URL can contain the bot token.
+    throw new ApiError(503, "Telegram временно недоступен");
+  }
   const result = await response.json().catch(() => null);
-  if (!response.ok || !result?.ok) throw new Error("Telegram API request failed");
+  if (!response.ok || !result?.ok) throw new ApiError(503, "Telegram временно недоступен");
   return result.result;
 }
 
@@ -74,16 +82,16 @@ function sameHex(left: string, right: string): boolean {
   return different === 0;
 }
 
-async function verifyTelegramAuth(value: unknown): Promise<{ id: string; username: string }> {
+async function verifyTelegramAuth(value: unknown): Promise<{ id: string; username: string | null }> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new ApiError(401, "Войдите через Telegram");
   const auth = value as Record<string, unknown>;
   const id = String(auth.id ?? "");
-  const username = String(auth.username ?? "");
+  const username = auth.username == null || auth.username === "" ? null : String(auth.username);
   const authDate = Number(auth.auth_date);
   const hash = String(auth.hash ?? "").toLowerCase();
   const now = Math.floor(Date.now() / 1000);
   if (!/^[1-9]\d{0,15}$/.test(id) || !Number.isSafeInteger(Number(id)) ||
-      !/^[A-Za-z0-9_]{5,32}$/.test(username) ||
+      (username !== null && !/^[A-Za-z0-9_]{5,32}$/.test(username)) ||
       !Number.isInteger(authDate) || authDate > now + 60 || now - authDate > 86400 ||
       !/^[a-f0-9]{64}$/.test(hash)) {
     throw new ApiError(401, "Подтверждение Telegram недействительно или устарело");
@@ -91,7 +99,7 @@ async function verifyTelegramAuth(value: unknown): Promise<{ id: string; usernam
 
   const checkString = Object.entries(auth)
     .filter(([key]) => key !== "hash")
-    .sort(([a], [b]) => a.localeCompare(b))
+    .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
     .map(([key, item]) => `${key}=${String(item)}`)
     .join("\n");
   const secret = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(botToken()));
@@ -99,6 +107,33 @@ async function verifyTelegramAuth(value: unknown): Promise<{ id: string; usernam
   const expected = hex(await crypto.subtle.sign("HMAC", hmacKey, new TextEncoder().encode(checkString)));
   if (!sameHex(expected, hash)) throw new ApiError(401, "Подтверждение Telegram не прошло проверку");
   return { id, username };
+}
+
+async function readBody(request: Request): Promise<Record<string, unknown>> {
+  const length = Number(request.headers.get("content-length") || 0);
+  if (!Number.isFinite(length) || length > MAX_BODY_BYTES) throw new ApiError(413, "Слишком большой запрос");
+  const reader = request.body?.getReader();
+  if (!reader) throw new ApiError(400, "Пустой запрос");
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > MAX_BODY_BYTES) {
+      await reader.cancel();
+      throw new ApiError(413, "Слишком большой запрос");
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+  let body: unknown;
+  try { body = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); }
+  catch { throw new ApiError(400, "Неверный запрос"); }
+  if (!body || typeof body !== "object" || Array.isArray(body)) throw new ApiError(400, "Неверный запрос");
+  return body as Record<string, unknown>;
 }
 
 function textValue(value: unknown, max: number): string {
@@ -145,8 +180,11 @@ Deno.serve(async (request: Request) => {
   try {
     if (request.method === "GET" && route === "config") {
       if (!botToken()) return json({ enabled: false }, 200, origin);
+      if (cachedBot && cachedBot.until > Date.now()) return json({ enabled: true, botUsername: cachedBot.username }, 200, origin);
       try {
         const bot = await telegram("getMe");
+        if (typeof bot.username !== "string" || !/^[A-Za-z0-9_]{5,32}$/.test(bot.username)) throw new Error("Invalid bot username");
+        cachedBot = { username: bot.username, until: Date.now() + 300_000 };
         return json({ enabled: true, botUsername: bot.username }, 200, origin);
       } catch {
         return json({ enabled: false }, 200, origin);
@@ -154,9 +192,7 @@ Deno.serve(async (request: Request) => {
     }
     if (!botToken()) throw new ApiError(503, "Telegram-бот ещё не подключён администратором");
     if (request.method !== "POST") throw new ApiError(405, "Метод не поддерживается");
-    if (Number(request.headers.get("content-length") || 0) > 16384) throw new ApiError(413, "Слишком большой запрос");
-    const body = await request.json().catch(() => null);
-    if (!body || typeof body !== "object") throw new ApiError(400, "Неверный запрос");
+    const body = await readBody(request);
     const identity = await verifyTelegramAuth(body.auth);
     const member = await rpc("telegram_resolve_member", {
       p_telegram_user_id: identity.id,
@@ -173,6 +209,10 @@ Deno.serve(async (request: Request) => {
       return json({ profile: { id: memberId, name: member.name, username: member.username }, notificationWarning }, 200, origin);
     }
     if (route === "state") return json(await rpc("member_state", { p_member_id: memberId }), 200, origin);
+    if (route === "test-notification") {
+      const warning = await sendNotice(identity.id, `Проверка уведомлений трекера стендов для профиля ${member.name}.`);
+      return json({ delivered: !warning, notificationWarning: warning }, 200, origin);
+    }
 
     const params = body.params && typeof body.params === "object" && !Array.isArray(body.params)
       ? body.params as Record<string, unknown> : {};

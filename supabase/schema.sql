@@ -259,12 +259,7 @@ set search_path = pg_catalog, private
 as $$ select private.withdraw_release_request(p_code, p_stand) $$;
 
 revoke all on all functions in schema private from public, anon, authenticated;
-grant usage on schema private to anon, authenticated;
-grant execute on function private.get_tracker_state(text) to anon, authenticated;
-grant execute on function private.claim_stand(text, text, text, text, timestamptz) to anon, authenticated;
-grant execute on function private.release_stand(text, text, text) to anon, authenticated;
-grant execute on function private.request_release(text, text, text, timestamptz, text) to anon, authenticated;
-grant execute on function private.withdraw_release_request(text, text) to anon, authenticated;
+revoke usage on schema private from anon, authenticated;
 
 revoke all on function public.get_tracker_state(text) from public;
 revoke all on function public.claim_stand(text, text, text, text, timestamptz) from public;
@@ -272,8 +267,5 @@ revoke all on function public.release_stand(text, text, text) from public;
 revoke all on function public.request_release(text, text, text, timestamptz, text) from public;
 revoke all on function public.withdraw_release_request(text, text) from public;
 
-grant execute on function public.get_tracker_state(text) to anon, authenticated;
-grant execute on function public.claim_stand(text, text, text, text, timestamptz) to anon, authenticated;
-grant execute on function public.release_stand(text, text, text) to anon, authenticated;
-grant execute on function public.request_release(text, text, text, timestamptz, text) to anon, authenticated;
-grant execute on function public.withdraw_release_request(text, text) to anon, authenticated;
+-- Legacy shared-code RPCs remain defined for historical compatibility but are
+-- intentionally inaccessible to browser roles. Telegram-only API is the entrypoint.

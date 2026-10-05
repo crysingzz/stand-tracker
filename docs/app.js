@@ -6,20 +6,16 @@ const PRIORITIES = {
 };
 const config = window.STAND_TRACKER_CONFIG || {};
 const apiUrl = String(config.supabaseUrl || "").replace(/\/+$/, "");
-const apiKey = String(config.publishableKey || "");
 const telegramApiUrl = `${apiUrl}/functions/v1/stand-tracker-api`;
-const configured = (/^https:\/\//.test(apiUrl) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(apiUrl)) && apiKey.length > 10;
+const configured = /^https:\/\//.test(apiUrl) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(apiUrl);
 
 const $ = (selector) => document.querySelector(selector);
 const standGrid = $("#standGrid");
 const historyList = $("#historyList");
 const accessScreen = $("#accessScreen");
-const accessForm = $("#accessForm");
 const actionDialog = $("#actionDialog");
 const actionForm = $("#actionForm");
 
-let teamCode = "";
-let loginMode = "team";
 let telegramAuth = null;
 let profile = null;
 let botUsername = "";
@@ -29,6 +25,7 @@ let pending = false;
 let action = null;
 let requestEpoch = 0;
 let toastTimeout;
+let signingIn = false;
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({
@@ -90,20 +87,20 @@ function errorMessage(error) {
   return message;
 }
 
-async function rpc(name, parameters) {
-  if (!configured) throw new Error("Сервис ещё не подключён. Сообщите администратору команды.");
-  const response = await fetch(`${apiUrl}/rest/v1/rpc/${name}`, {
-    method: "POST",
-    headers: { "apikey": apiKey, "Content-Type": "application/json" },
-    body: JSON.stringify({ p_code: teamCode, ...parameters })
-  });
-  let body;
-  try { body = await response.json(); } catch { body = null; }
-  if (!response.ok) throw new Error(body?.message || `Ошибка сервера (${response.status})`);
-  if (!body || !Array.isArray(body.active) || !Array.isArray(body.requests) || !Array.isArray(body.history)) {
-    throw new Error("Сервер вернул неполные данные. Повторите попытку.");
-  }
-  return body;
+function showLogin(message = "Войдите через Telegram.") {
+  requestEpoch += 1;
+  telegramAuth = null;
+  profile = null;
+  loaded = false;
+  if (actionDialog.open) actionDialog.close();
+  accessScreen.hidden = false;
+  $("#lockButton").hidden = true;
+  $("#testNotification").hidden = true;
+  $("#accountName").hidden = true;
+  $("#telegramStatus").textContent = message;
+  $("#telegramRetry").hidden = false;
+  setConnection("Нужен вход", "offline");
+  render();
 }
 
 async function telegramApi(route, params = {}) {
@@ -115,13 +112,7 @@ async function telegramApi(route, params = {}) {
   let body;
   try { body = await response.json(); } catch { body = null; }
   if (response.status === 401) {
-    telegramAuth = null;
-    profile = null;
-    loaded = false;
-    localStorage.removeItem("stand-tracker-telegram-auth");
-    accessScreen.hidden = false;
-    $("#lockButton").hidden = true;
-    render();
+    showLogin("Подтверждение Telegram устарело. Нажмите «Повторить вход» и подтвердите его заново.");
   }
   if (!response.ok) throw new Error(body?.message || `Ошибка сервера (${response.status})`);
   return body;
@@ -138,9 +129,9 @@ function renderCard(stand) {
     `<div class="metric"><span class="metric-label">План освободить</span><span class="metric-value ${new Date(session.planned_end_at) < new Date() ? "late" : ""}">${dateTime(session.planned_end_at)}</span></div>` : "";
   const requestNote = request ?
     `<div class="request-note"><strong>${escapeHtml(request.requester_name)}</strong> просит освободить до <strong>${dateTime(request.needed_by)}</strong><br>${escapeHtml(request.reason)}</div>` : "";
-  const canRelease = loginMode !== "telegram" || !session?.occupant_member_id || session.occupant_member_id === profile?.id;
-  const canWithdraw = loginMode !== "telegram" || !request?.requester_member_id || request.requester_member_id === profile?.id;
-  const canRequest = loginMode !== "telegram" || session?.occupant_member_id !== profile?.id;
+  const canRelease = !session?.occupant_member_id || session.occupant_member_id === profile?.id;
+  const canWithdraw = request?.requester_member_id === profile?.id;
+  const canRequest = session?.occupant_member_id !== profile?.id;
   const buttons = !loaded ? "" : !session ?
     `<button class="primary-button" data-action="claim" data-stand="${stand}" type="button">Занять стенд</button>` :
     `${canRelease ? `<button class="primary-button" data-action="release" data-stand="${stand}" type="button">Освободить</button>` : ""}
@@ -184,6 +175,9 @@ function render() {
 }
 
 function applyState(data) {
+  if (!data || !Array.isArray(data.active) || !Array.isArray(data.requests) || !Array.isArray(data.history)) {
+    throw new Error("Сервер вернул неполные данные. Повторите попытку.");
+  }
   tracker = data;
   if (data.profile) profile = data.profile;
   loaded = true;
@@ -192,28 +186,21 @@ function applyState(data) {
 }
 
 async function refresh() {
-  if ((loginMode === "telegram" ? !telegramAuth : !teamCode) || pending || document.hidden) return;
+  if (!telegramAuth || pending || document.hidden) return;
   const epoch = requestEpoch;
   try {
-    const data = loginMode === "telegram" ? await telegramApi("state") : await rpc("get_tracker_state", {});
+    const data = await telegramApi("state");
     if (epoch === requestEpoch && !pending) applyState(data);
   } catch (error) {
-    if (epoch === requestEpoch) setConnection(loginMode === "telegram" && !telegramAuth ? "Войдите снова" : "Нет связи", "offline");
+    if (epoch === requestEpoch) setConnection(!telegramAuth ? "Войдите снова" : "Нет связи", "offline");
   }
-}
-
-function rememberName(name) {
-  localStorage.setItem("stand-tracker-name", name);
 }
 
 function openDialog(type, stand) {
   if (!STANDS.includes(stand) || pending) return;
   action = { type, stand };
   const session = tracker.active.find((item) => item.stand_code === stand);
-  const name = escapeHtml(localStorage.getItem("stand-tracker-name") || "");
-  const nameField = loginMode === "telegram"
-    ? `<p class="profile-caption">От вашего имени: ${escapeHtml(profile?.name || "")}</p>`
-    : `<div><label for="personName">Ваше имя</label><input id="personName" name="personName" maxlength="80" value="${name}" autocomplete="name" required /></div>`;
+  const nameField = `<p class="profile-caption">От вашего имени: ${escapeHtml(profile?.name || "")}</p>`;
   $("#dialogEyebrow").textContent = `СТЕНД ${stand}`;
   $("#dialogError").textContent = "";
   let title, description, fields, submit;
@@ -248,7 +235,6 @@ function openDialog(type, stand) {
   $("#dialogFields").innerHTML = fields;
   $("#submitDialog").textContent = submit;
   actionDialog.showModal();
-  $("#personName")?.focus();
 }
 
 async function submitAction(event) {
@@ -256,22 +242,17 @@ async function submitAction(event) {
   if (!action || pending) return;
   const { type, stand } = action;
   const fields = new FormData(actionForm);
-  const name = loginMode === "telegram" ? profile?.name || "" : String(fields.get("personName") || "").trim();
-  let rpcName, params;
+  let params;
   try {
     if (type === "claim") {
       const planned = String(fields.get("plannedEnd") || "");
-      rpcName = "claim_stand_with_priority";
-      params = { p_stand: stand, p_name: name, p_purpose: String(fields.get("purpose") || "").trim(), p_planned_end: planned ? new Date(planned).toISOString() : null, p_priority: String(fields.get("priority") || "") };
+      params = { stand, purpose: String(fields.get("purpose") || "").trim(), plannedEnd: planned ? new Date(planned).toISOString() : null, priority: String(fields.get("priority") || "") };
     } else if (type === "release") {
-      rpcName = "release_stand";
-      params = { p_stand: stand, p_actor: name };
+      params = { stand };
     } else if (type === "request") {
-      rpcName = "request_release";
-      params = { p_stand: stand, p_name: name, p_needed_by: new Date(String(fields.get("neededBy"))).toISOString(), p_reason: String(fields.get("reason") || "").trim() };
+      params = { stand, neededBy: new Date(String(fields.get("neededBy"))).toISOString(), reason: String(fields.get("reason") || "").trim() };
     } else {
-      rpcName = "withdraw_release_request";
-      params = { p_stand: stand };
+      params = { stand };
     }
   } catch {
     $("#dialogError").textContent = "Проверьте указанное время.";
@@ -282,112 +263,64 @@ async function submitAction(event) {
   pending = true;
   requestEpoch += 1;
   try {
-    let data;
-    let notificationWarning = null;
-    if (loginMode === "telegram") {
-      const telegramParams = { stand };
-      if (type === "claim") Object.assign(telegramParams, { purpose: params.p_purpose, plannedEnd: params.p_planned_end, priority: params.p_priority });
-      if (type === "request") Object.assign(telegramParams, { neededBy: params.p_needed_by, reason: params.p_reason });
-      const result = await telegramApi(type, telegramParams);
-      data = result.state;
-      notificationWarning = result.notificationWarning;
-    } else {
-      data = await rpc(rpcName, params);
-      if (name) rememberName(name);
-    }
-    applyState(data);
+    const result = await telegramApi(type, params);
+    applyState(result.state);
     actionDialog.close();
-    showToast(notificationWarning || { claim: "Стенд занят", release: "Стенд освобождён", request: "Запрос отправлен", withdraw: "Запрос снят" }[type]);
+    showToast(result.notificationWarning || { claim: "Стенд занят", release: "Стенд освобождён", request: "Запрос отправлен", withdraw: "Запрос снят" }[type]);
   } catch (error) {
-    $("#dialogError").textContent = errorMessage(error);
-    setConnection("Нет связи", "offline");
+    if (telegramAuth) {
+      $("#dialogError").textContent = errorMessage(error);
+      setConnection("Нет связи", "offline");
+    }
   } finally {
     pending = false;
     $("#submitDialog").disabled = false;
   }
 }
 
-accessForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  if (!configured) return;
-  teamCode = $("#teamCode").value.trim();
-  $("#accessError").textContent = "";
-  $("#accessSubmit").disabled = true;
-  try {
-    const data = await rpc("get_tracker_state", {});
-    if ($("#rememberCode").checked) localStorage.setItem("stand-tracker-code", teamCode);
-    else localStorage.removeItem("stand-tracker-code");
-    applyState(data);
-    accessScreen.hidden = true;
-    $("#lockButton").hidden = false;
-  } catch (error) {
-    teamCode = "";
-    localStorage.removeItem("stand-tracker-code");
-    $("#accessError").textContent = errorMessage(error);
-    setConnection("Нет связи", "offline");
-  } finally {
-    $("#accessSubmit").disabled = false;
-  }
-});
-
 $("#lockButton").addEventListener("click", () => {
-  requestEpoch += 1;
-  loaded = false;
-  if (loginMode === "telegram") {
-    telegramAuth = null;
-    profile = null;
-    localStorage.removeItem("stand-tracker-telegram-auth");
-  } else {
-    teamCode = "";
-    localStorage.removeItem("stand-tracker-code");
-    $("#teamCode").value = "";
-    $("#rememberCode").checked = false;
-  }
-  $("#lockButton").hidden = true;
-  accessScreen.hidden = false;
-  setConnection("Закрыто");
-  render();
-  if (loginMode === "team") $("#teamCode").focus();
-});
-
-$("#legacyAccessButton").addEventListener("click", () => {
-  loginMode = "team";
-  telegramAuth = null;
-  profile = null;
-  $("#telegramAccess").hidden = true;
-  accessForm.hidden = false;
-  $("#lockButton").textContent = "Сменить код";
-  $("#teamCode").focus();
+  showLogin("Вы вышли из трекера. Для нового входа подтвердите Telegram.");
 });
 
 window.onTelegramAuth = async (user) => {
+  if (signingIn) return;
+  signingIn = true;
+  const epoch = ++requestEpoch;
   telegramAuth = user;
   $("#telegramError").textContent = "";
+  $("#telegramStatus").textContent = "Проверяем Telegram и загружаем стенды…";
   try {
     const result = await telegramApi("auth");
+    if (epoch !== requestEpoch) return;
     profile = result.profile;
-    localStorage.setItem("stand-tracker-telegram-auth", JSON.stringify(user));
     const data = await telegramApi("state");
+    if (epoch !== requestEpoch) return;
     applyState(data);
     accessScreen.hidden = true;
-    $("#lockButton").textContent = "Выйти";
     $("#lockButton").hidden = false;
+    $("#testNotification").hidden = false;
+    $("#accountName").textContent = profile.name;
+    $("#accountName").hidden = false;
     if (result.notificationWarning) showToast(result.notificationWarning);
   } catch (error) {
-    telegramAuth = null;
-    profile = null;
-    localStorage.removeItem("stand-tracker-telegram-auth");
-    $("#telegramError").textContent = errorMessage(error);
+    if (epoch === requestEpoch && telegramAuth) {
+      $("#telegramStatus").textContent = profile ? `Профиль «${profile.name}» подключён, но стенды пока не загрузились.` : "Не удалось войти.";
+      $("#telegramError").textContent = errorMessage(error);
+      $("#telegramRetry").hidden = false;
+      setConnection("Нет связи", "offline");
+    }
+  } finally {
+    signingIn = false;
   }
 };
 
 function startTelegramLogin(username) {
-  loginMode = "telegram";
   botUsername = username;
-  accessForm.hidden = true;
-  $("#telegramAccess").hidden = false;
   $("#telegramBotLink").href = `https://t.me/${encodeURIComponent(botUsername)}`;
-  $("#lockButton").textContent = "Выйти";
+  $("#telegramBotLink").hidden = false;
+  $("#telegramStatus").textContent = "Подтвердите вход в Telegram. Если вы уже входили, Telegram может сразу передать подтверждение.";
+  $("#telegramRetry").hidden = false;
+  $("#telegramWidget").replaceChildren();
   const script = document.createElement("script");
   script.src = "https://telegram.org/js/telegram-widget.js?22";
   script.setAttribute("data-telegram-login", botUsername);
@@ -395,18 +328,16 @@ function startTelegramLogin(username) {
   script.setAttribute("data-radius", "10");
   script.setAttribute("data-request-access", "write");
   script.setAttribute("data-onauth", "onTelegramAuth(user)");
+  script.onerror = () => { $("#telegramError").textContent = "Не удалось загрузить кнопку Telegram. Проверьте соединение и попробуйте снова."; };
   $("#telegramWidget").append(script);
-  const saved = localStorage.getItem("stand-tracker-telegram-auth");
-  if (saved) {
-    try { window.onTelegramAuth(JSON.parse(saved)); }
-    catch { localStorage.removeItem("stand-tracker-telegram-auth"); }
-  }
 }
 
 async function initialize() {
+  localStorage.removeItem("stand-tracker-telegram-auth");
+  localStorage.removeItem("stand-tracker-code");
   if (!configured) {
-    $("#accessError").textContent = "Сервис ещё подключается. Попросите администратора завершить настройку.";
-    $("#accessSubmit").disabled = true;
+    $("#telegramError").textContent = "Сервис ещё подключается. Попросите администратора завершить настройку.";
+    $("#telegramStatus").textContent = "Вход временно недоступен.";
     setConnection("Не подключено", "offline");
     return;
   }
@@ -418,16 +349,44 @@ async function initialize() {
       setConnection("Закрыто");
       return;
     }
-  } catch { /* Shared-code access remains available while Telegram is being configured. */ }
-  const saved = localStorage.getItem("stand-tracker-code");
-  if (saved) {
-    $("#teamCode").value = saved;
-    $("#rememberCode").checked = true;
-    accessForm.requestSubmit();
-  } else {
-    setConnection("Закрыто");
-  }
+  } catch { /* Report unavailable configuration; never fall back to a shared secret. */ }
+  $("#telegramStatus").textContent = "Вход через Telegram сейчас недоступен.";
+  $("#telegramError").textContent = "Не удалось подключиться к сервису. Повторите попытку или сообщите администратору.";
+  $("#telegramRetry").hidden = false;
+  setConnection("Нет связи", "offline");
 }
+
+$("#telegramRetry").addEventListener("click", async () => {
+  $("#telegramError").textContent = "";
+  if (profile && telegramAuth) {
+    try {
+      applyState(await telegramApi("state"));
+      accessScreen.hidden = true;
+      $("#lockButton").hidden = false;
+      $("#testNotification").hidden = false;
+      $("#accountName").textContent = profile.name;
+      $("#accountName").hidden = false;
+      return;
+    } catch (error) {
+      if (telegramAuth) $("#telegramError").textContent = errorMessage(error);
+    }
+  }
+  if (botUsername) startTelegramLogin(botUsername);
+  else initialize();
+});
+
+$("#testNotification").addEventListener("click", async () => {
+  const button = $("#testNotification");
+  button.disabled = true;
+  try {
+    const result = await telegramApi("test-notification");
+    showToast(result.notificationWarning || "Проверочное сообщение отправлено вам в Telegram.");
+  } catch (error) {
+    if (telegramAuth) showToast(errorMessage(error));
+  } finally {
+    button.disabled = false;
+  }
+});
 
 standGrid.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-action]");
