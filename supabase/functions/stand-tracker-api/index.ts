@@ -36,11 +36,17 @@ function serviceKey(): string {
 async function rpc(name: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
   const url = Deno.env.get("SUPABASE_URL");
   if (!url) throw new ApiError(503, "Supabase не подключён");
-  const response = await fetch(`${url}/rest/v1/rpc/${name}`, {
-    method: "POST",
-    headers: { "apikey": serviceKey(), "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${url}/rest/v1/rpc/${name}`, {
+      method: "POST",
+      headers: { "apikey": serviceKey(), "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+      signal: AbortSignal.timeout(8_000),
+    });
+  } catch {
+    throw new ApiError(503, "База данных временно недоступна");
+  }
   const body = await response.json().catch(() => null);
   if (!response.ok) {
     if (response.status >= 500) throw new ApiError(503, "База данных временно недоступна");
@@ -61,6 +67,7 @@ async function telegram(method: string, payload: Record<string, unknown> = {}): 
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(8_000),
     });
   } catch {
     // Never log a fetch error: its URL can contain the bot token.
@@ -161,7 +168,7 @@ async function sendNotice(chatId: unknown, message: string): Promise<string | nu
     await telegram("sendMessage", { chat_id: chatId, text: message });
     return null;
   } catch {
-    return "Изменение сохранено, но Telegram-уведомление не доставлено. Получателю нужно открыть бота и нажать Start.";
+    return "Изменение сохранено, но доставку Telegram-уведомления не удалось подтвердить. Получателю нужно открыть бота и нажать Start.";
   }
 }
 
