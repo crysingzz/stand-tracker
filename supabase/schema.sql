@@ -40,6 +40,12 @@ create table if not exists private.release_requests (
   resolved_at timestamptz
 );
 
+-- Defense in depth: browser roles have no policies on these private tables.
+-- The five validated SECURITY DEFINER functions remain the only entry points.
+alter table private.team_config enable row level security;
+alter table private.sessions enable row level security;
+alter table private.release_requests enable row level security;
+
 create unique index if not exists one_open_release_request_per_stand
   on private.release_requests (stand_code) where resolved_at is null;
 
@@ -66,7 +72,7 @@ $$;
 
 revoke all on function private.require_team_code(text) from public, anon, authenticated;
 
-create or replace function public.get_tracker_state(p_code text)
+create or replace function private.get_tracker_state(p_code text)
 returns jsonb
 language plpgsql
 security definer
@@ -96,7 +102,7 @@ begin
 end;
 $$;
 
-create or replace function public.claim_stand(
+create or replace function private.claim_stand(
   p_code text, p_stand text, p_name text,
   p_purpose text default '', p_planned_end timestamptz default null
 )
@@ -126,11 +132,11 @@ begin
   end if;
   insert into private.sessions (stand_code, occupant_name, purpose, planned_end_at)
   values (p_stand, btrim(p_name), btrim(coalesce(p_purpose, '')), p_planned_end);
-  return public.get_tracker_state(p_code);
+  return private.get_tracker_state(p_code);
 end;
 $$;
 
-create or replace function public.release_stand(p_code text, p_stand text, p_actor text)
+create or replace function private.release_stand(p_code text, p_stand text, p_actor text)
 returns jsonb
 language plpgsql
 security definer
@@ -155,11 +161,11 @@ begin
   update private.release_requests
   set resolved_at = now()
   where stand_code = p_stand and resolved_at is null;
-  return public.get_tracker_state(p_code);
+  return private.get_tracker_state(p_code);
 end;
 $$;
 
-create or replace function public.request_release(
+create or replace function private.request_release(
   p_code text, p_stand text, p_name text,
   p_needed_by timestamptz, p_reason text
 )
@@ -192,11 +198,11 @@ begin
   end if;
   insert into private.release_requests (stand_code, requester_name, needed_by, reason)
   values (p_stand, btrim(p_name), p_needed_by, btrim(p_reason));
-  return public.get_tracker_state(p_code);
+  return private.get_tracker_state(p_code);
 end;
 $$;
 
-create or replace function public.withdraw_release_request(p_code text, p_stand text)
+create or replace function private.withdraw_release_request(p_code text, p_stand text)
 returns jsonb
 language plpgsql
 security definer
@@ -214,9 +220,50 @@ begin
   if not found then
     raise exception 'Активного запроса нет';
   end if;
-  return public.get_tracker_state(p_code);
+  return private.get_tracker_state(p_code);
 end;
 $$;
+
+-- Public API wrappers have no elevated privileges. The implementation lives in
+-- an unexposed schema, validates the shared code, and owns the private tables.
+create or replace function public.get_tracker_state(p_code text)
+returns jsonb language sql security invoker
+set search_path = pg_catalog, private
+as $$ select private.get_tracker_state(p_code) $$;
+
+create or replace function public.claim_stand(
+  p_code text, p_stand text, p_name text,
+  p_purpose text default '', p_planned_end timestamptz default null
+)
+returns jsonb language sql security invoker
+set search_path = pg_catalog, private
+as $$ select private.claim_stand(p_code, p_stand, p_name, p_purpose, p_planned_end) $$;
+
+create or replace function public.release_stand(p_code text, p_stand text, p_actor text)
+returns jsonb language sql security invoker
+set search_path = pg_catalog, private
+as $$ select private.release_stand(p_code, p_stand, p_actor) $$;
+
+create or replace function public.request_release(
+  p_code text, p_stand text, p_name text,
+  p_needed_by timestamptz, p_reason text
+)
+returns jsonb language sql security invoker
+set search_path = pg_catalog, private
+as $$ select private.request_release(p_code, p_stand, p_name, p_needed_by, p_reason) $$;
+
+create or replace function public.withdraw_release_request(p_code text, p_stand text)
+returns jsonb language sql security invoker
+set search_path = pg_catalog, private
+as $$ select private.withdraw_release_request(p_code, p_stand) $$;
+
+revoke all on all functions in schema private from public, anon, authenticated;
+grant usage on schema private to anon, authenticated;
+grant execute on function private.get_tracker_state(text) to anon, authenticated;
+grant execute on function private.claim_stand(text, text, text, text, timestamptz) to anon, authenticated;
+grant execute on function private.release_stand(text, text, text) to anon, authenticated;
+grant execute on function private.request_release(text, text, text, timestamptz, text) to anon, authenticated;
+grant execute on function private.withdraw_release_request(text, text) to anon, authenticated;
 
 revoke all on function public.get_tracker_state(text) from public;
 revoke all on function public.claim_stand(text, text, text, text, timestamptz) from public;
