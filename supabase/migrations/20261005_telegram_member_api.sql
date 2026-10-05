@@ -183,7 +183,7 @@ begin
   select requester_member_id into v_requester_member_id from private.release_requests
   where stand_code = p_stand and resolved_at is null;
   if not found then raise exception 'Активного запроса нет'; end if;
-  if v_requester_member_id is not null and v_requester_member_id <> p_member_id then
+  if v_requester_member_id is distinct from p_member_id then
     raise exception 'Снять запрос может только его автор';
   end if;
   update private.release_requests set resolved_at = now()

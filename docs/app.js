@@ -214,7 +214,9 @@ function openDialog(type, stand) {
     submit = "Занять";
   } else if (type === "release") {
     title = "Освободить стенд";
-    description = `Завершить работу ${session ? escapeHtml(session.occupant_name) : "на стенде"}? Время будет сохранено в истории.`;
+    description = session?.occupant_member_id
+      ? `Завершить работу ${escapeHtml(session.occupant_name)}? Время будет сохранено в истории.`
+      : "Это старая запись без подтверждённого владельца. Любой участник команды может закрыть её; время останется в истории.";
     fields = nameField;
     submit = "Освободить";
   } else if (type === "request") {
