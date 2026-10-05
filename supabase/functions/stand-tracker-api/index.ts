@@ -23,7 +23,7 @@ function cors(origin: string | null): Record<string, string> {
 function json(value: unknown, status: number, origin: string | null): Response {
   return new Response(JSON.stringify(value), {
     status,
-    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...cors(origin) },
+    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", ...cors(origin) },
   });
 }
 
@@ -54,8 +54,11 @@ async function rpc<T = Record<string, unknown>>(name: string, params: Record<str
   try { body = JSON.parse(raw); } catch { throw new ApiError(502, "Неверный ответ базы данных"); }
   if (!response.ok) {
     if (response.status >= 500) throw new ApiError(503, "База данных временно недоступна");
-    const message = body && typeof body === "object" && "message" in body ? String(body.message) : "Действие не удалось";
-    throw new ApiError(400, message);
+    const code = body && typeof body === "object" && "code" in body ? String(body.code) : "";
+    const message = body && typeof body === "object" && "message" in body ? String(body.message) : "";
+    if (code === "P0001") throw new ApiError(400, message.slice(0, 300) || "Действие не удалось");
+    if (code === "23505") throw new ApiError(409, "Данные уже изменились. Обновите страницу и повторите действие.");
+    throw new ApiError(503, "Не удалось сохранить данные. Повторите попытку позже.");
   }
   return body as T;
 }

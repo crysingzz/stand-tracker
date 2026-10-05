@@ -13,6 +13,7 @@ const $ = (selector) => document.querySelector(selector);
 const standGrid = $("#standGrid");
 const historyList = $("#historyList");
 const accessScreen = $("#accessScreen");
+const appShell = $(".app-shell");
 const actionDialog = $("#actionDialog");
 const actionForm = $("#actionForm");
 
@@ -27,6 +28,24 @@ let action = null;
 let requestEpoch = 0;
 let toastTimeout;
 let signingIn = false;
+let beginningLogin = false;
+let refreshing = false;
+let initializing = false;
+
+function storedSession() {
+  try { return sessionStorage.getItem("stand-tracker-session"); }
+  catch { return null; }
+}
+
+function saveSession(token) {
+  try { sessionStorage.setItem("stand-tracker-session", token); return true; }
+  catch { return false; }
+}
+
+function clearSession() {
+  try { sessionStorage.removeItem("stand-tracker-session"); }
+  catch { /* The in-memory session is still cleared. */ }
+}
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({
@@ -77,10 +96,11 @@ function showToast(message) {
   toast.textContent = message;
   toast.classList.add("show");
   clearTimeout(toastTimeout);
-  toastTimeout = setTimeout(() => toast.classList.remove("show"), 4000);
+  toastTimeout = setTimeout(() => toast.classList.remove("show"), message.length > 70 ? 9000 : 4000);
 }
 
 function errorMessage(error) {
+  if (error?.name === "AbortError") return "Сервер долго не отвечает. Проверьте соединение и повторите попытку.";
   if (error instanceof TypeError) return "Нет связи с сервером. Проверьте интернет и повторите попытку.";
   const message = String(error?.message || "Не удалось выполнить действие");
   if (message.includes("Failed to fetch")) return "Нет связи с сервером. Проверьте интернет и повторите попытку.";
@@ -92,14 +112,16 @@ function showLogin(message = "Войдите через Telegram.") {
   requestEpoch += 1;
   sessionToken = null;
   loginChallenge = null;
-  sessionStorage.removeItem("stand-tracker-session");
+  clearSession();
   profile = null;
   loaded = false;
   if (actionDialog.open) actionDialog.close();
   accessScreen.hidden = false;
+  appShell.inert = true;
   $("#lockButton").hidden = true;
   $("#testNotification").hidden = true;
   $("#accountName").hidden = true;
+  $("#refreshButton").hidden = true;
   $("#telegramStatus").textContent = message;
   $("#codeStep").hidden = true;
   $("#telegramBotLink").hidden = true;
@@ -110,20 +132,35 @@ function showLogin(message = "Войдите через Telegram.") {
   $("#telegramRetry").hidden = true;
   setConnection("Нужен вход", "offline");
   render();
+  if (botUsername) $("#beginLogin").focus();
+  if (!botUsername && configured && !initializing) void initialize(message);
 }
 
 async function telegramApi(route, payload = {}, protectedRoute = true) {
-  const response = await fetch(`${telegramApiUrl}/${route}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...(protectedRoute && sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}) },
-    body: JSON.stringify(payload)
-  });
+  const authToken = protectedRoute ? sessionToken : null;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  let response;
+  try {
+    response = await fetch(`${telegramApiUrl}/${route}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
   let body;
   try { body = await response.json(); } catch { body = null; }
-  if (response.status === 401 && protectedRoute) {
+  if (response.status === 401 && protectedRoute && sessionToken === authToken) {
     showLogin("Сеанс завершился. Получите новый код в Telegram.");
   }
-  if (!response.ok) throw new Error(body?.message || `Ошибка сервера (${response.status})`);
+  if (!response.ok) {
+    const error = new Error(body?.message || `Ошибка сервера (${response.status})`);
+    error.status = response.status;
+    throw error;
+  }
   return body;
 }
 
@@ -180,7 +217,9 @@ function render() {
   standGrid.innerHTML = STANDS.map(renderCard).join("");
   renderHistory();
   $("#busyCount").textContent = loaded ? String(tracker.active.length) : "—";
-  if (loaded) $("#lastUpdated").textContent = `Обновлено ${new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit" }).format(new Date())}`;
+  $("#lastUpdated").textContent = loaded
+    ? `Обновлено ${new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date())}`
+    : "Ожидание входа";
 }
 
 function applyState(data) {
@@ -190,18 +229,21 @@ function applyState(data) {
   tracker = data;
   if (data.profile) profile = data.profile;
   loaded = true;
-  setConnection("Обновляется", "online");
+  setConnection("На связи", "online");
   render();
 }
 
-async function refresh() {
-  if (!sessionToken || pending || document.hidden) return;
+async function refresh(force = false) {
+  if (!sessionToken || pending || refreshing || (!force && document.hidden)) return;
+  refreshing = true;
   const epoch = requestEpoch;
   try {
     const data = await telegramApi("state");
     if (epoch === requestEpoch && !pending) applyState(data);
   } catch (error) {
     if (epoch === requestEpoch) setConnection(!sessionToken ? "Войдите снова" : "Нет связи", "offline");
+  } finally {
+    refreshing = false;
   }
 }
 
@@ -280,6 +322,9 @@ async function submitAction(event) {
   }
   $("#dialogError").textContent = "";
   $("#submitDialog").disabled = true;
+  $("#submitDialog").textContent = "Сохраняем…";
+  $("#closeDialog").disabled = true;
+  $("#cancelDialog").disabled = true;
   pending = true;
   requestEpoch += 1;
   try {
@@ -290,29 +335,39 @@ async function submitAction(event) {
   } catch (error) {
     if (sessionToken) {
       $("#dialogError").textContent = errorMessage(error);
-      setConnection("Нет связи", "offline");
+      if (!error.status || error.status >= 500) setConnection("Нет связи", "offline");
     }
   } finally {
     pending = false;
     $("#submitDialog").disabled = false;
+    $("#submitDialog").textContent = { claim: "Занять", release: "Освободить", request: "Отправить запрос", withdraw: "Снять запрос" }[type];
+    $("#closeDialog").disabled = false;
+    $("#cancelDialog").disabled = false;
   }
 }
 
 function showTracker() {
   accessScreen.hidden = true;
+  appShell.inert = false;
   $("#lockButton").hidden = false;
   $("#testNotification").hidden = false;
   $("#accountName").textContent = profile.name;
   $("#accountName").hidden = false;
+  $("#refreshButton").hidden = false;
+  $("#pageTitle").focus({ preventScroll: true });
 }
 
 async function beginLogin() {
+  if (beginningLogin || signingIn || sessionToken) return;
+  beginningLogin = true;
   const button = $("#beginLogin");
   button.disabled = true;
+  $("#telegramRetry").disabled = true;
   $("#telegramError").textContent = "";
   $("#telegramStatus").textContent = "Готовим одноразовую ссылку…";
   try {
     const challenge = await telegramApi("begin-login", {}, false);
+    if (sessionToken) return;
     if (!/^[A-Za-z0-9_-]{43}$/.test(challenge.startToken) ||
         !/^[A-Za-z0-9_-]{43}$/.test(challenge.browserToken) ||
         challenge.startLink !== `https://t.me/${botUsername}?start=${challenge.startToken}`) throw new Error("Сервер вернул неверную ссылку");
@@ -327,11 +382,16 @@ async function beginLogin() {
     $("#beginLogin").hidden = true;
     $("#loginCode").value = "";
     $("#telegramStatus").textContent = "Откройте приложение Telegram, нажмите Start в чате бота и введите код из личного сообщения.";
+    $("#telegramBotLink").focus();
   } catch (error) {
-    $("#telegramStatus").textContent = "Не удалось подготовить вход.";
+    $("#telegramStatus").textContent = loginChallenge
+      ? "Новую ссылку создать не удалось. Пока можно использовать предыдущую."
+      : "Не удалось подготовить вход.";
     $("#telegramError").textContent = errorMessage(error);
   } finally {
     button.disabled = false;
+    $("#telegramRetry").disabled = false;
+    beginningLogin = false;
   }
 }
 
@@ -349,6 +409,7 @@ $("#codeForm").addEventListener("submit", async (event) => {
   if (!loginChallenge || signingIn) return;
   signingIn = true;
   $("#submitCode").disabled = true;
+  $("#telegramRetry").disabled = true;
   $("#telegramError").textContent = "";
   try {
     const result = await telegramApi("complete-login", {
@@ -356,15 +417,20 @@ $("#codeForm").addEventListener("submit", async (event) => {
       browserToken: loginChallenge.browserToken,
       code: $("#loginCode").value.trim(),
     }, false);
+    if (!/^[A-Za-z0-9_-]{43}$/.test(result.sessionToken) ||
+        !Number.isSafeInteger(Number(result.profile?.id)) || typeof result.profile?.name !== "string") {
+      throw new Error("Сервер вернул неполный профиль. Повторите вход.");
+    }
     sessionToken = result.sessionToken;
     profile = result.profile;
-    sessionStorage.setItem("stand-tracker-session", sessionToken);
+    const persisted = saveSession(sessionToken);
     loginChallenge = null;
     $("#loginCode").value = "";
     $("#manualCommand").textContent = "";
     try {
       applyState(await telegramApi("state"));
       showTracker();
+      if (!persisted) showToast("Браузер не сохранил сеанс: после обновления страницы понадобится новый код.");
     } catch (error) {
       if (sessionToken) {
         $("#telegramStatus").textContent = "Вход выполнен, но стенды пока не загрузились.";
@@ -379,6 +445,7 @@ $("#codeForm").addEventListener("submit", async (event) => {
   } finally {
     signingIn = false;
     $("#submitCode").disabled = false;
+    $("#telegramRetry").disabled = false;
   }
 });
 
@@ -395,49 +462,65 @@ $("#lockButton").addEventListener("click", async () => {
   }
 });
 
-async function initialize() {
-  localStorage.removeItem("stand-tracker-telegram-auth");
-  localStorage.removeItem("stand-tracker-code");
-  if (!configured) {
-    $("#telegramError").textContent = "Сервис ещё подключается. Попросите администратора завершить настройку.";
-    $("#telegramStatus").textContent = "Вход временно недоступен.";
-    setConnection("Не подключено", "offline");
-    return;
-  }
-  sessionToken = sessionStorage.getItem("stand-tracker-session");
-  if (sessionToken) {
+async function initialize(loginMessage = "") {
+  if (initializing) return;
+  initializing = true;
+  try {
     try {
-      applyState(await telegramApi("state"));
-      showTracker();
+      localStorage.removeItem("stand-tracker-telegram-auth");
+      localStorage.removeItem("stand-tracker-code");
+    } catch { /* Storage may be disabled; the new login does not use it. */ }
+    if (!configured) {
+      $("#telegramError").textContent = "Сервис ещё подключается. Попросите администратора завершить настройку.";
+      $("#telegramStatus").textContent = "Вход временно недоступен.";
+      setConnection("Не подключено", "offline");
       return;
-    } catch (error) {
-      if (sessionToken) {
-        $("#telegramStatus").textContent = "Не удалось загрузить стенды.";
-        $("#telegramError").textContent = errorMessage(error);
-        $("#telegramRetry").textContent = "Повторить загрузку";
-        $("#telegramRetry").hidden = false;
-        setConnection("Нет связи", "offline");
+    }
+    sessionToken = storedSession();
+    if (sessionToken) {
+      try {
+        applyState(await telegramApi("state"));
+        showTracker();
         return;
+      } catch (error) {
+        if (sessionToken) {
+          $("#telegramStatus").textContent = "Не удалось загрузить стенды.";
+          $("#telegramError").textContent = errorMessage(error);
+          $("#telegramRetry").textContent = "Повторить загрузку";
+          $("#telegramRetry").hidden = false;
+          setConnection("Нет связи", "offline");
+          return;
+        }
       }
     }
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15_000);
+      let telegramConfig;
+      try {
+        const response = await fetch(`${telegramApiUrl}/config`, { cache: "no-store", signal: controller.signal });
+        telegramConfig = response.ok ? await response.json() : null;
+      } finally {
+        clearTimeout(timeout);
+      }
+      if (telegramConfig?.enabled && /^[A-Za-z0-9_]{5,32}$/.test(telegramConfig.botUsername)) {
+        botUsername = telegramConfig.botUsername;
+        $("#telegramStatus").textContent = loginMessage || "Нажмите кнопку, чтобы получить код в Telegram.";
+        $("#beginLogin").hidden = false;
+        $("#telegramRetry").hidden = true;
+        setConnection("Нужен вход", "offline");
+        $("#beginLogin").focus();
+        return;
+      }
+    } catch { /* No insecure fallback. */ }
+    $("#telegramStatus").textContent = "Вход через Telegram сейчас недоступен.";
+    $("#telegramError").textContent = "Не удалось подключиться к сервису. Повторите попытку или сообщите администратору.";
+    $("#telegramRetry").textContent = "Повторить подключение";
+    $("#telegramRetry").hidden = false;
+    setConnection("Нет связи", "offline");
+  } finally {
+    initializing = false;
   }
-  try {
-    const response = await fetch(`${telegramApiUrl}/config`, { cache: "no-store" });
-    const telegramConfig = response.ok ? await response.json() : null;
-    if (telegramConfig?.enabled && /^[A-Za-z0-9_]{5,32}$/.test(telegramConfig.botUsername)) {
-      botUsername = telegramConfig.botUsername;
-      $("#telegramStatus").textContent = "Нажмите кнопку, чтобы получить код в Telegram.";
-      $("#beginLogin").hidden = false;
-      $("#telegramRetry").hidden = true;
-      setConnection("Нужен вход", "offline");
-      return;
-    }
-  } catch { /* No insecure fallback. */ }
-  $("#telegramStatus").textContent = "Вход через Telegram сейчас недоступен.";
-  $("#telegramError").textContent = "Не удалось подключиться к сервису. Повторите попытку или сообщите администратору.";
-  $("#telegramRetry").textContent = "Повторить подключение";
-  $("#telegramRetry").hidden = false;
-  setConnection("Нет связи", "offline");
 }
 
 $("#telegramRetry").addEventListener("click", async () => {
@@ -466,6 +549,8 @@ $("#testNotification").addEventListener("click", async () => {
   }
 });
 
+$("#refreshButton").addEventListener("click", () => refresh(true));
+
 standGrid.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-action]");
   if (button) openDialog(button.dataset.action, button.dataset.stand);
@@ -492,8 +577,9 @@ actionDialog.addEventListener("click", (event) => {
     addButton.focus();
   }
 });
-$("#closeDialog").addEventListener("click", () => actionDialog.close());
-$("#cancelDialog").addEventListener("click", () => actionDialog.close());
+$("#closeDialog").addEventListener("click", () => { if (!pending) actionDialog.close(); });
+$("#cancelDialog").addEventListener("click", () => { if (!pending) actionDialog.close(); });
+actionDialog.addEventListener("cancel", (event) => { if (pending) event.preventDefault(); });
 actionDialog.addEventListener("close", () => { action = null; });
 
 setInterval(() => {
@@ -503,6 +589,7 @@ setInterval(() => {
 }, 1000);
 setInterval(refresh, 15000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+window.addEventListener("online", () => refresh(true));
 
 render();
 initialize();

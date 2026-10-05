@@ -1,5 +1,5 @@
--- Base schema. For a fresh installation, run the two files in migrations/
--- after this one. The shared code itself is not stored here.
+-- Base schema. For a fresh installation, apply the migrations in the order
+-- listed in README.md after this file. The shared code itself is not stored here.
 -- All data tables are private; browsers can call only validated functions.
 
 create schema if not exists private;

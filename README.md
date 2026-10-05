@@ -26,9 +26,9 @@
 ## Развёртывание своей копии с Supabase
 
 1. Создайте бесплатный проект на [supabase.com](https://supabase.com/dashboard).
-2. Откройте **SQL Editor** и выполните целиком [`supabase/schema.sql`](supabase/schema.sql), затем миграции в таком порядке: `20261005_priority_and_members.sql`, `20261005_telegram_member_api.sql`, `20261005_member_indexes.sql`, `20261005_telegram_only_cutover.sql`, `20261005_legacy_request_ownership_fix.sql`, `20261005_idempotent_telegram_binding.sql`, `20261005132624_bot_code_auth.sql`, `20261005135007_index_bot_login_challenge_member.sql`. Они не удаляют существующие сеансы стендов.
+2. Откройте **SQL Editor** и выполните целиком [`supabase/schema.sql`](supabase/schema.sql), затем миграции в таком порядке: `20261005_priority_and_members.sql`, `20261005_telegram_member_api.sql`, `20261005_member_indexes.sql`, `20261005_telegram_only_cutover.sql`, `20261005_legacy_request_ownership_fix.sql`, `20261005_idempotent_telegram_binding.sql`, `20261005132624_bot_code_auth.sql`, `20261005135007_index_bot_login_challenge_member.sql`, `20261005171423_bind_site_session_to_telegram_id.sql`, `20261005184918_bind_login_challenge_to_telegram_id.sql`. Они не удаляют существующие сеансы стендов.
 3. Настройте токен бота в секретах Edge Function и разрешённый адрес сайта в `allowedOrigins` функции.
-4. Заполните публичный Project URL в [`docs/config.js`](docs/config.js).
+4. Заполните публичный Project URL в [`docs/config.js`](docs/config.js) и замените адрес Supabase в `connect-src` политики безопасности [`docs/index.html`](docs/index.html) на URL своего проекта.
 5. Откройте сайт, войдите через Telegram и проверьте занятие и освобождение стенда. Затем откройте сайт на другом устройстве и убедитесь, что изменение видно там.
 
 Таблицы находятся в закрытой схеме `private`. Прямое чтение и изменение таблиц из браузера запрещены. Функции для личных профилей доступны только серверной функции, которая проверяет одноразовый код и сеанс. Webhook принимает только запросы с секретным заголовком Telegram. Старые функции с общим кодом не разрешены браузерным ролям.
@@ -39,4 +39,6 @@
 
 Для локального просмотра: `python3 -m http.server 8765 --directory docs` и откройте `http://localhost:8765`. Пока `docs/config.js` пустой, сайт показывает экран ожидания подключения и не принимает действия.
 
-На бесплатном плане Supabase проект может приостанавливаться после недели низкой активности; его можно возобновить в панели управления. Поэтому если сайт долго не использовали и он показывает «Нет связи», проверьте состояние проекта Supabase.
+Для регрессионной проверки с локально запущенным сайтом: `deno run -A tests/browser_integration.ts` и `deno run -A tests/accessibility.ts`. Тесты запускают Google Chrome на macOS и подменяют ответы API, поэтому не занимают реальные стенды. `deno run -A tests/live_security.ts` проверяет опубликованный API без изменения занятости.
+
+На бесплатном плане [Supabase может приостановить проект после недели низкой активности](https://supabase.com/docs/guides/platform/free-project-pausing); его можно возобновить в панели управления. Поэтому если сайт долго не использовали и он показывает «Нет связи», проверьте состояние проекта Supabase.

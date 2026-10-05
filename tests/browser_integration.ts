@@ -20,10 +20,13 @@ try {
   const page = await browser.newPage();
   let active: Record<string, unknown>[] = [];
   let rejectNextState = false;
+  let rejectNextClaim = false;
+  let delayNextClaim = false;
   let rejectNextNotice = false;
   let rejectNextLogout = false;
   let submittedPlannedEnd: unknown = undefined;
   let loginCount = 0;
+  let beginCount = 0;
   let logoutCount = 0;
   let usedWidget = false;
 
@@ -35,7 +38,7 @@ try {
     let status = 200;
     let body: Record<string, unknown>;
     if (action === "config") body = { enabled: true, botUsername: "ouroboros_stands_tracker_bot" };
-    else if (action === "begin-login") body = { startToken: "b".repeat(43), browserToken: "c".repeat(43), startLink: `https://t.me/ouroboros_stands_tracker_bot?start=${"b".repeat(43)}`, expiresAt: new Date(Date.now() + 300000).toISOString() };
+    else if (action === "begin-login") { beginCount++; body = { startToken: "b".repeat(43), browserToken: "c".repeat(43), startLink: `https://t.me/ouroboros_stands_tracker_bot?start=${"b".repeat(43)}`, expiresAt: new Date(Date.now() + 300000).toISOString() }; }
     else if (action === "complete-login") {
       const payload = route.request().postDataJSON();
       if (payload.code === "12345678") { loginCount++; body = { sessionToken: token, profile, expiresAt: new Date(Date.now() + 43200000).toISOString() }; }
@@ -53,10 +56,14 @@ try {
         body = { message: "Временная ошибка" };
       } else body = { ...emptyState, active };
     } else if (action === "claim") {
-      const payload = route.request().postDataJSON();
-      submittedPlannedEnd = payload.params.plannedEnd;
-      active = [...active, { stand_code: payload.params.stand, occupant_name: profile.name, occupant_member_id: profile.id, purpose: payload.params.purpose, priority: payload.params.priority, planned_end_at: payload.params.plannedEnd, started_at: new Date().toISOString() }];
-      body = { state: { ...emptyState, active }, notificationWarning: null };
+      if (rejectNextClaim) { rejectNextClaim = false; status = 400; body = { message: "Стенд уже занят" }; }
+      else {
+        if (delayNextClaim) { delayNextClaim = false; await new Promise((resolve) => setTimeout(resolve, 700)); }
+        const payload = route.request().postDataJSON();
+        submittedPlannedEnd = payload.params.plannedEnd;
+        active = [...active, { stand_code: payload.params.stand, occupant_name: profile.name, occupant_member_id: profile.id, purpose: payload.params.purpose, priority: payload.params.priority, planned_end_at: payload.params.plannedEnd, started_at: new Date().toISOString() }];
+        body = { state: { ...emptyState, active }, notificationWarning: null };
+      }
     } else if (action === "test-notification") {
       if (rejectNextNotice) {
         rejectNextNotice = false;
@@ -91,8 +98,35 @@ try {
   assert(!(await page.locator("#accessScreen").isVisible()), "Login overlay must close after auth and state");
   assert(await page.evaluate(() => sessionStorage.getItem("stand-tracker-session")) === token, "Only opaque site session must be stored");
   assert(loginCount === 1, "Correct code must complete login once");
+  await page.reload();
+  await page.locator("#accountName").getByText(profile.name).waitFor();
+  assert(!(await page.locator("#accessScreen").isVisible()), "Reload must restore a valid session");
+  await page.locator("#lockButton").click();
+  await page.locator("#beginLogin").waitFor({ state: "visible" });
+  assert(await page.locator("#beginLogin").isVisible(), "Logout after reload must offer a new login");
+  await page.locator("#beginLogin").click();
+  await page.locator("#loginCode").fill("12345678");
+  await page.locator("#submitCode").click();
+  await page.locator("#accountName").getByText(profile.name).waitFor();
+
+  for (const width of [320, 390, 768, 1280]) {
+    await page.setViewportSize({ width, height: 800 });
+    const size = await page.evaluate(() => ({ page: document.documentElement.scrollWidth, viewport: innerWidth }));
+    assert(size.page <= size.viewport, `No horizontal overflow at ${width}px: ${size.page}px`);
+  }
+  await page.setViewportSize({ width: 390, height: 800 });
+
+  rejectNextState = true;
+  await page.locator("#refreshButton").click();
+  await page.locator("#connectionStatus.offline").getByText("Нет связи").waitFor();
+  await page.locator("#refreshButton").click();
+  await page.locator("#connectionStatus.online").getByText("На связи").waitFor();
 
   await page.getByRole("button", { name: "Занять стенд" }).first().click();
+  rejectNextClaim = true;
+  await page.locator("#submitDialog").click();
+  await page.locator("#dialogError").getByText("Стенд уже занят").waitFor();
+  assert(await page.locator("#connectionStatus.online").count() === 1, "Business conflict must not be labeled offline");
   await page.locator("#purpose").fill("Проверка");
   await page.locator("#priority").selectOption("high");
   assert(!(await page.locator("#plannedEndField").isVisible()), "Planned end must be collapsed initially");
@@ -108,7 +142,12 @@ try {
   await page.locator("#clearPlannedEnd").click();
   assert(!(await page.locator("#plannedEndField").isVisible()), "Clear must collapse planned end");
   assert(await page.locator("#plannedEnd").inputValue() === "", "Clear must remove the selected time");
+  delayNextClaim = true;
   await page.locator("#submitDialog").click();
+  assert(await page.locator("#closeDialog").isDisabled(), "Close must be disabled while saving");
+  assert(await page.locator("#cancelDialog").isDisabled(), "Cancel must be disabled while saving");
+  await page.keyboard.press("Escape");
+  assert(await page.locator("#actionDialog").evaluate((dialog: HTMLDialogElement) => dialog.open), "Escape must not hide an action in progress");
   await page.getByText("Высокий приоритет").waitFor();
   assert((await page.locator(".stand-card.busy").count()) === 1, "Claim must update the stand");
   assert(submittedPlannedEnd === null, "Claim after clearing time must send null");
@@ -145,8 +184,25 @@ try {
   await page.locator("#accessScreen").waitFor({ state: "visible" });
   assert(await page.locator("#accessScreen").isVisible(), "Logout must show login overlay");
   assert(await page.evaluate(() => sessionStorage.getItem("stand-tracker-session")) === null, "Logout must remove the site session");
-  assert(logoutCount === 1, "Logout must revoke server session");
-  console.log("PASS: bot-code login, wrong code, protected actions, optional planned end, expiry, retry, revoked logout");
+  assert(logoutCount === 2, "Both logouts must revoke their server sessions");
+
+  await page.addInitScript(() => {
+    for (const key of ["getItem", "setItem", "removeItem"] as const) {
+      Object.defineProperty(Storage.prototype, key, { configurable: true, value() { throw new DOMException("Storage blocked", "SecurityError"); } });
+    }
+  });
+  await page.reload();
+  await page.locator("#beginLogin").waitFor({ state: "visible" });
+  const previousBegins = beginCount;
+  await page.evaluate(() => { document.querySelector<HTMLButtonElement>("#beginLogin")!.click(); document.querySelector<HTMLButtonElement>("#beginLogin")!.click(); });
+  await page.locator("#telegramBotLink").waitFor({ state: "visible" });
+  assert(beginCount === previousBegins + 1, "Double click must create one challenge");
+  await page.locator("#loginCode").fill("12345678");
+  await page.locator("#submitCode").click();
+  await page.locator("#accountName").getByText(profile.name).waitFor();
+  assert(!(await page.locator("#accessScreen").isVisible()), "Login must work with blocked browser storage");
+  await page.getByText("Браузер не сохранил сеанс", { exact: false }).waitFor();
+  console.log("PASS: bot-code login, blocked storage, mobile layout, refresh, conflicts, optional planned end, expiry, retry, revoked logout");
 } finally {
   await browser.close();
 }
