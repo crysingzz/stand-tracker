@@ -27,7 +27,7 @@
 ## Развёртывание своей копии с Supabase
 
 1. Создайте бесплатный проект на [supabase.com](https://supabase.com/dashboard).
-2. Откройте **SQL Editor** и выполните целиком [`supabase/schema.sql`](supabase/schema.sql), затем по порядку SQL-файлы из `supabase/migrations/`. Они не удаляют существующие сеансы.
+2. Откройте **SQL Editor** и выполните целиком [`supabase/schema.sql`](supabase/schema.sql), затем миграции в таком порядке: `20261005_priority_and_members.sql`, `20261005_telegram_member_api.sql`, `20261005_member_indexes.sql`, `20261005_telegram_only_cutover.sql`, `20261005_legacy_request_ownership_fix.sql`, `20261005_idempotent_telegram_binding.sql`. Они не удаляют существующие сеансы.
 3. Настройте токен бота в секретах Edge Function, домен в BotFather и разрешённый адрес сайта в `allowedOrigins` функции.
 4. Заполните публичный Project URL в [`docs/config.js`](docs/config.js).
 5. Откройте сайт, войдите через Telegram и проверьте занятие и освобождение стенда. Затем откройте сайт на другом устройстве и убедитесь, что изменение видно там.

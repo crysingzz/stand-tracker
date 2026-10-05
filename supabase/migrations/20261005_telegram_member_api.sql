@@ -19,7 +19,7 @@ begin
   end if;
 
   select * into v_member from private.members
-  where telegram_user_id = p_telegram_user_id for update;
+  where telegram_user_id = p_telegram_user_id;
   if not found then
     if p_telegram_username is null then
       raise exception 'Нужен Telegram @username из списка команды';
@@ -29,12 +29,14 @@ begin
     if not found then
       raise exception 'Ваш Telegram @username не добавлен в команду';
     end if;
-    if v_member.telegram_user_id is not null then
+    if v_member.telegram_user_id is not null and v_member.telegram_user_id <> p_telegram_user_id then
       raise exception 'Этот профиль уже связан с другим Telegram-аккаунтом';
     end if;
-    update private.members set telegram_user_id = p_telegram_user_id
-    where id = v_member.id returning * into v_member;
-    v_newly_linked := true;
+    if v_member.telegram_user_id is null then
+      update private.members set telegram_user_id = p_telegram_user_id
+      where id = v_member.id returning * into v_member;
+      v_newly_linked := true;
+    end if;
   end if;
 
   return jsonb_build_object(
