@@ -114,6 +114,9 @@ footer { border-top: 1px solid #283743; color: #728a93; font-size: .78rem; line-
 .close-button:hover { color: white; }
 .dialog-description { margin: 14px 0 22px; color: #b2c2c7; line-height: 1.48; }
 .dialog-fields > div { margin-bottom: 18px; }
+.dialog-fields .field-label { display: block; margin-bottom: 8px; color: #dbe7e9; font-size: .88rem; font-weight: 650; }
+.planned-end-field { margin-top: 13px; }
+.planned-end-field .text-button { min-height: 40px; margin-top: 8px; }
 .profile-caption { color: #8ee9db; font-size: .9rem; margin: 0 0 18px; }
 .dialog-fields .field-hint { display: block; margin-top: 6px; color: #8197a0; font-size: .78rem; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 9px; padding-top: 8px; }

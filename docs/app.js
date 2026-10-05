@@ -210,7 +210,16 @@ function openDialog(type, stand) {
     fields = `${nameField}
       <div><label for="purpose">Чем занимаетесь</label><input id="purpose" name="purpose" maxlength="200" placeholder="Например, ПСИ" /><span class="field-hint">Необязательно</span></div>
       <div><label for="priority">Приоритет задачи</label><select id="priority" name="priority" required><option value="low">Низкий — может подождать</option><option value="normal" selected>Обычный</option><option value="high">Высокий — срочно нужен стенд</option></select></div>
-      <div><label for="plannedEnd">Планируете освободить</label><input id="plannedEnd" name="plannedEnd" type="datetime-local" min="${localDateInput(new Date(Date.now() + 60000))}" /><span class="field-hint">Необязательно. Это время увидят все.</span></div>`;
+      <div class="planned-end-control">
+        <span class="field-label">Планируете освободить</span>
+        <button id="addPlannedEnd" class="secondary-button" type="button" aria-controls="plannedEndField" aria-expanded="false">Указать время</button>
+        <div id="plannedEndField" class="planned-end-field" hidden>
+          <label for="plannedEnd">Когда освободите</label>
+          <input id="plannedEnd" name="plannedEnd" type="datetime-local" min="${localDateInput(new Date(Date.now() + 60000))}" value="" autocomplete="off" />
+          <button id="clearPlannedEnd" class="text-button" type="button">Убрать время</button>
+          <span class="field-hint">Необязательно. Это время увидят все.</span>
+        </div>
+      </div>`;
     submit = "Занять";
   } else if (type === "release") {
     title = "Освободить стенд";
@@ -395,6 +404,27 @@ standGrid.addEventListener("click", (event) => {
   if (button) openDialog(button.dataset.action, button.dataset.stand);
 });
 actionForm.addEventListener("submit", submitAction);
+actionDialog.addEventListener("click", (event) => {
+  if (!(event.target instanceof Element)) return;
+  const button = event.target.closest("#addPlannedEnd, #clearPlannedEnd");
+  if (!button) return;
+  const field = $("#plannedEndField");
+  const input = $("#plannedEnd");
+  const addButton = $("#addPlannedEnd");
+  if (button.id === "addPlannedEnd") {
+    field.hidden = false;
+    addButton.hidden = true;
+    addButton.setAttribute("aria-expanded", "true");
+    input.focus();
+    try { input.showPicker?.(); } catch { /* Native picker is optional. */ }
+  } else {
+    input.value = "";
+    field.hidden = true;
+    addButton.hidden = false;
+    addButton.setAttribute("aria-expanded", "false");
+    addButton.focus();
+  }
+});
 $("#closeDialog").addEventListener("click", () => actionDialog.close());
 $("#cancelDialog").addEventListener("click", () => actionDialog.close());
 actionDialog.addEventListener("close", () => { action = null; });

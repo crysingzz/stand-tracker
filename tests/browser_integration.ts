@@ -21,6 +21,7 @@ try {
   let active: Record<string, unknown>[] = [];
   let rejectNextState = false;
   let rejectNextNotice = false;
+  let submittedPlannedEnd: unknown = undefined;
 
   await page.route("https://telegram.org/js/telegram-widget.js?22", (route) => route.fulfill({
     status: 200, contentType: "application/javascript", body: "",
@@ -41,7 +42,8 @@ try {
       } else body = { ...emptyState, active };
     } else if (action === "claim") {
       const payload = route.request().postDataJSON();
-      active = [{ stand_code: payload.params.stand, occupant_name: profile.name, occupant_member_id: profile.id, purpose: payload.params.purpose, priority: payload.params.priority, started_at: new Date().toISOString() }];
+      submittedPlannedEnd = payload.params.plannedEnd;
+      active = [...active, { stand_code: payload.params.stand, occupant_name: profile.name, occupant_member_id: profile.id, purpose: payload.params.purpose, priority: payload.params.priority, planned_end_at: payload.params.plannedEnd, started_at: new Date().toISOString() }];
       body = { state: { ...emptyState, active }, notificationWarning: null };
     } else if (action === "test-notification") {
       if (rejectNextNotice) {
@@ -69,9 +71,30 @@ try {
   await page.getByRole("button", { name: "Занять стенд" }).first().click();
   await page.locator("#purpose").fill("Проверка");
   await page.locator("#priority").selectOption("high");
+  assert(!(await page.locator("#plannedEndField").isVisible()), "Planned end must be collapsed initially");
+  assert(await page.locator("#plannedEnd").inputValue() === "", "Planned end must start empty");
+  await page.locator("#addPlannedEnd").click();
+  assert(await page.locator("#plannedEndField").isVisible(), "Planned end must open on click");
+  const future = await page.evaluate(() => {
+    const date = new Date(Date.now() + 3_600_000);
+    const part = (value: number) => String(value).padStart(2, "0");
+    return `${date.getFullYear()}-${part(date.getMonth() + 1)}-${part(date.getDate())}T${part(date.getHours())}:${part(date.getMinutes())}`;
+  });
+  await page.locator("#plannedEnd").fill(future);
+  await page.locator("#clearPlannedEnd").click();
+  assert(!(await page.locator("#plannedEndField").isVisible()), "Clear must collapse planned end");
+  assert(await page.locator("#plannedEnd").inputValue() === "", "Clear must remove the selected time");
   await page.locator("#submitDialog").click();
   await page.getByText("Высокий приоритет").waitFor();
   assert((await page.locator(".stand-card.busy").count()) === 1, "Claim must update the stand");
+  assert(submittedPlannedEnd === null, "Claim after clearing time must send null");
+
+  await page.getByRole("button", { name: "Занять стенд" }).first().click();
+  await page.locator("#addPlannedEnd").click();
+  await page.locator("#plannedEnd").fill(future);
+  await page.locator("#submitDialog").click();
+  assert(typeof submittedPlannedEnd === "string" && !Number.isNaN(Date.parse(submittedPlannedEnd)), "Selected planned end must reach the API");
+  await page.getByText("План освободить").waitFor();
 
   rejectNextNotice = true;
   await page.locator("#testNotification").click();
@@ -90,7 +113,7 @@ try {
   await page.locator("#lockButton").click();
   assert(await page.locator("#accessScreen").isVisible(), "Logout must show login overlay");
   assert(await page.evaluate(() => localStorage.getItem("stand-tracker-telegram-auth")) === null, "Logout must leave no signed auth on disk");
-  console.log("PASS: login, claim, expired auth, transient state retry, logout, no legacy fallback");
+  console.log("PASS: login, optional planned end add/clear, claim, expired auth, retry, logout");
 } finally {
   await browser.close();
 }
