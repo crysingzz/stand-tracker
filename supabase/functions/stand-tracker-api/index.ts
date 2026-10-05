@@ -6,6 +6,8 @@ const allowedOrigins = new Set([
   "http://127.0.0.1:8765",
 ]);
 const MAX_BODY_BYTES = 16_384;
+// All Telegram proofs issued before this UTC time were invalidated on 2026-10-05.
+const AUTH_NOT_BEFORE = 1_791_203_070; // 2026-10-05 12:24:30 UTC
 let cachedBot: { username: string; until: number } | null = null;
 
 class ApiError extends Error {
@@ -99,7 +101,7 @@ async function verifyTelegramAuth(value: unknown): Promise<{ id: string; usernam
   const now = Math.floor(Date.now() / 1000);
   if (!/^[1-9]\d{0,15}$/.test(id) || !Number.isSafeInteger(Number(id)) ||
       (username !== null && !/^[A-Za-z0-9_]{5,32}$/.test(username)) ||
-      !Number.isInteger(authDate) || authDate > now + 60 || now - authDate > 86400 ||
+      !Number.isInteger(authDate) || authDate < AUTH_NOT_BEFORE || authDate > now + 60 || now - authDate > 86400 ||
       !/^[a-f0-9]{64}$/.test(hash)) {
     throw new ApiError(401, "Подтверждение Telegram недействительно или устарело");
   }
