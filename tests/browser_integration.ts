@@ -38,7 +38,11 @@ try {
     let status = 200;
     let body: Record<string, unknown>;
     if (action === "config") body = { enabled: true, botUsername: "ouroboros_stands_tracker_bot" };
-    else if (action === "begin-login") { beginCount++; body = { startToken: "b".repeat(43), browserToken: "c".repeat(43), startLink: `https://t.me/ouroboros_stands_tracker_bot?start=${"b".repeat(43)}`, expiresAt: new Date(Date.now() + 300000).toISOString() }; }
+    else if (action === "request-code") {
+      assert(route.request().postDataJSON().username === "crysingzz", "Selected profile must be sent to the server");
+      beginCount++;
+      body = { startToken: "b".repeat(43), browserToken: "c".repeat(43), expiresAt: new Date(Date.now() + 300000).toISOString() };
+    }
     else if (action === "complete-login") {
       const payload = route.request().postDataJSON();
       if (payload.code === "12345678") { loginCount++; body = { sessionToken: token, profile, expiresAt: new Date(Date.now() + 43200000).toISOString() }; }
@@ -84,10 +88,12 @@ try {
   assert(!usedWidget, "Telegram widget must never be fetched");
   assert(await page.locator("#accessScreen").isVisible(), "Login overlay must be visible initially");
 
+  await page.locator("#loginProfile").selectOption("crysingzz");
   await page.locator("#beginLogin").click();
   await page.locator("#telegramBotLink").waitFor({ state: "visible" });
-  assert((await page.locator("#telegramBotLink").getAttribute("href"))?.startsWith("tg://resolve?domain=ouroboros_stands_tracker_bot&start="), "Link must open the Telegram app directly");
-  assert((await page.locator("#manualCommand").textContent())?.startsWith("/start "), "Manual fallback command must be present");
+  assert((await page.locator("#telegramBotLink").getAttribute("href")) === "tg://resolve?domain=ouroboros_stands_tracker_bot", "First-time link must open only the bot, without a token");
+  assert(await page.locator("#manualCommand").count() === 0, "No command must be copied into the bot");
+  assert((await page.locator("#telegramStatus").textContent())?.includes("Проверьте чат"), "User should be told to check Telegram");
   await page.locator("#loginCode").fill("87654321");
   await page.locator("#submitCode").click();
   await page.getByText("Неверный код").waitFor();
@@ -193,6 +199,7 @@ try {
   });
   await page.reload();
   await page.locator("#beginLogin").waitFor({ state: "visible" });
+  await page.locator("#loginProfile").selectOption("crysingzz");
   const previousBegins = beginCount;
   await page.evaluate(() => { document.querySelector<HTMLButtonElement>("#beginLogin")!.click(); document.querySelector<HTMLButtonElement>("#beginLogin")!.click(); });
   await page.locator("#telegramBotLink").waitFor({ state: "visible" });

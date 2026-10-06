@@ -14,6 +14,7 @@ await expectStatus("anonymous state", "state", 401, "https://crysingzz.github.io
 await expectStatus("legacy login", "auth", 401, "https://crysingzz.github.io");
 await expectStatus("unsigned webhook", "telegram-webhook", 403);
 await expectStatus("foreign browser origin", "begin-login", 403, "https://example.com");
+await expectStatus("missing profile", "request-code", 400, "https://crysingzz.github.io");
 
 const config = await fetch(`${api}/config`, { signal: AbortSignal.timeout(15_000) });
 const body = await config.json();

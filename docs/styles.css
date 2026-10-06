@@ -99,7 +99,7 @@ footer { border-top: 1px solid #283743; color: #728a93; font-size: .78rem; line-
 .access-card h1 { margin: 0; font-size: 1.9rem; letter-spacing: -.035em; }
 .access-copy { color: #aec1c7; line-height: 1.5; margin: 10px 0 25px; }
 .access-card label:not(.checkbox-row), .dialog-fields label { display: block; margin-bottom: 8px; color: #dbe7e9; font-size: .88rem; font-weight: 650; }
-.access-card input[type=text], .dialog-fields input, .dialog-fields textarea, .dialog-fields select { display: block; width: 100%; min-height: 43px; border: 1px solid #48616b; border-radius: 10px; background: #10202a; color: #f0f8f7; padding: 10px 12px; font-size: 1rem; }
+.access-card input[type=text], .access-card select, .dialog-fields input, .dialog-fields textarea, .dialog-fields select { display: block; width: 100%; min-height: 43px; border: 1px solid #48616b; border-radius: 10px; background: #10202a; color: #f0f8f7; padding: 10px 12px; font-size: 1rem; }
 .dialog-fields textarea { min-height: 100px; resize: vertical; }
 .checkbox-row { display: flex; align-items: center; gap: 8px; color: #a9bac1; font-size: .86rem; margin: 17px 0 9px; }
 .checkbox-row input { width: 17px; height: 17px; accent-color: #76e1d4; }
@@ -109,10 +109,8 @@ footer { border-top: 1px solid #283743; color: #728a93; font-size: .78rem; line-
 .code-step form { margin-top: 17px; }
 .code-step input { letter-spacing: .18em; font-variant-numeric: tabular-nums; }
 .code-step .telegram-bot-link { width: 100%; text-align: center; }
-.telegram-manual { margin: 15px 0 7px; color: #aec1c7; font-size: .8rem; line-height: 1.4; }
-.telegram-command { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border: 1px solid #3e5661; border-radius: 9px; background: #10202a; }
-.telegram-command code { min-width: 0; flex: 1; overflow-wrap: anywhere; color: #d2e8e5; font-size: .75rem; user-select: all; }
-.telegram-command button { flex: none; }
+.telegram-manual { margin: 15px 0 9px; color: #aec1c7; font-size: .85rem; line-height: 1.45; }
+.telegram-manual strong { color: #e5f4f0; }
 .telegram-hint { color: #aec1c7; font-size: .86rem; line-height: 1.5; }
 .telegram-bot-link { display: inline-block; text-decoration: none; }
 .form-error { min-height: 1.2em; color: #ffaaa2; font-size: .85rem; line-height: 1.4; margin: 10px 0 0; }

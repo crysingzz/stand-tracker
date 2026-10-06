@@ -257,11 +257,25 @@ async function handleTelegramWebhook(request: Request, origin: string | null): P
   }
   const command = typeof item.text === "string" ? /^\/start(?:@\w+)?(?:\s+([A-Za-z0-9_-]{43}))?\s*$/.exec(item.text) : null;
   if (!command) return json({ ok: true }, 200, origin);
-  if (!command[1]) {
-    await telegram("sendMessage", { chat_id: from.id, text: "Чтобы войти в трекер стендов, откройте сайт и нажмите «Получить код в Telegram». Затем перейдите по выданной ссылке." });
-    return json({ ok: true }, 200, origin);
+  let startHash = command[1] ? await sha256Hex(command[1]) : "";
+  if (!startHash) {
+    let pending: Record<string, unknown>;
+    try {
+      pending = await rpc("bot_login_pending_for_telegram", {
+        p_telegram_user_id: from.id,
+        p_telegram_username: typeof from.username === "string" ? from.username : null,
+      });
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.status !== 400) throw error;
+      await telegram("sendMessage", { chat_id: from.id, text: "Этот Telegram-аккаунт не привязан к команде. Попросите администратора проверить ваш @username." });
+      return json({ ok: true }, 200, origin);
+    }
+    if (pending.status !== "pending" || !/^[0-9a-f]{64}$/.test(String(pending.start_hash))) {
+      await telegram("sendMessage", { chat_id: from.id, text: "Бот подключён. Если код уже пришёл, введите его на сайте. Иначе нажмите там «Получить код в Telegram» — я пришлю его сюда." });
+      return json({ ok: true }, 200, origin);
+    }
+    startHash = String(pending.start_hash);
   }
-  const startHash = await sha256Hex(command[1]);
   const code = randomCode();
   const codeHash = await hmacHex(botToken(), `${startHash}:${code}`);
   let result: Record<string, unknown>;
@@ -278,9 +292,11 @@ async function handleTelegramWebhook(request: Request, origin: string | null): P
     return json({ ok: true }, 200, origin);
   }
   if (result.status === "ready") {
-    await telegram("sendMessage", { chat_id: from.id, text: `Код для входа в трекер стендов: ${code}\n\nВведите его на сайте в течение 5 минут. Никому не пересылайте код.` });
+    await telegram("sendMessage", { chat_id: from.id, text: `Код для входа в трекер стендов: ${code}\n\nВведите его на сайте в течение 5 минут. Никому не пересылайте код. Если не запрашивали вход, просто проигнорируйте сообщение.` });
+  } else if (result.status === "already_sent") {
+    return json({ ok: true }, 200, origin);
   } else {
-    await telegram("sendMessage", { chat_id: from.id, text: "Ссылка на вход устарела или уже использована. Вернитесь на сайт и запросите новую." });
+    await telegram("sendMessage", { chat_id: from.id, text: "Запрос на вход устарел или уже использован. Вернитесь на сайт и запросите новый код." });
   }
   return json({ ok: true }, 200, origin);
 }
@@ -314,6 +330,29 @@ Deno.serve(async (request: Request) => {
       });
       return json({ startToken, browserToken, startLink: `https://t.me/${bot.username}?start=${startToken}`, expiresAt: challenge.expires_at }, 200, origin);
     }
+    if (route === "request-code") {
+      const username = String(body.username ?? "").trim().replace(/^@/, "").toLowerCase();
+      if (!/^[a-z0-9_]{5,32}$/.test(username)) throw new ApiError(400, "Выберите свой профиль команды");
+      const startToken = randomToken();
+      const browserToken = randomToken();
+      const startHash = await sha256Hex(startToken);
+      const code = randomCode();
+      const challenge = await rpc<Record<string, unknown>>("bot_login_request_code", {
+        p_start_hash: startHash,
+        p_browser_hash: await sha256Hex(browserToken),
+        p_code_hash: await hmacHex(botToken(), `${startHash}:${code}`),
+        p_username: username,
+      });
+      if (challenge.status === "cooldown") {
+        throw new ApiError(429, `Новый код можно запросить через ${Number(challenge.retry_after) || 30} сек.`);
+      }
+      if (challenge.status === "send" && challenge.chat_id) {
+        await telegram("sendMessage", { chat_id: challenge.chat_id, text: `Код для входа в трекер стендов: ${code}\n\nВведите его на сайте в течение 5 минут. Никому не пересылайте код. Если не запрашивали вход, просто проигнорируйте сообщение.` });
+      } else if (challenge.status !== "needs_start") {
+        throw new ApiError(503, "Не удалось подготовить вход. Повторите попытку позже.");
+      }
+      return json({ startToken, browserToken, expiresAt: challenge.expires_at }, 200, origin);
+    }
     if (route === "complete-login") {
       const startToken = tokenValue(body.startToken);
       const browserToken = tokenValue(body.browserToken);
@@ -329,10 +368,10 @@ Deno.serve(async (request: Request) => {
       });
       if (result.status !== "ok") {
         const failures: Record<string, [number, string]> = {
-          pending: [409, "Сначала откройте бота по ссылке и получите код"],
+          pending: [409, "Сначала откройте бота в Telegram и нажмите Start, чтобы получить код"],
           wrong: [400, `Неверный код. Осталось попыток: ${Number(result.remaining) || 0}`],
-          locked: [429, "Слишком много неверных кодов. Запросите новую ссылку"],
-          expired: [410, "Код устарел. Запросите новую ссылку"],
+          locked: [429, "Слишком много неверных кодов. Запросите новый код"],
+          expired: [410, "Код устарел. Запросите новый код"],
           invalid: [400, "Неверный запрос на вход"],
         };
         const failure = failures[String(result.status)] || [400, "Не удалось войти"];

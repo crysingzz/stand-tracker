@@ -14,7 +14,7 @@ const browser = await chromium.launch({
 });
 
 try {
-  for (const width of [390, 1280]) {
+  for (const width of [320, 390, 1280]) {
     for (const mode of ["login", "code", "dashboard", "dialog"] as const) {
       const context = await browser.newContext({ viewport: { width, height: 850 } });
       const page = await context.newPage();
@@ -22,8 +22,8 @@ try {
         const action = route.request().url().slice(api.length).split("?")[0];
         const body = action === "config"
           ? { enabled: true, botUsername: "ouroboros_stands_tracker_bot" }
-          : action === "begin-login"
-          ? { startToken, browserToken, startLink: `https://t.me/ouroboros_stands_tracker_bot?start=${startToken}`, expiresAt: new Date(Date.now() + 300_000).toISOString() }
+          : action === "request-code"
+          ? { startToken, browserToken, expiresAt: new Date(Date.now() + 300_000).toISOString() }
           : { active: [], requests: [], history: [], profile };
         return route.fulfill({
           status: 200,
@@ -37,6 +37,7 @@ try {
       }
       await page.goto(site);
       if (mode === "code") {
+        await page.locator("#loginProfile").selectOption("crysingzz");
         await page.locator("#beginLogin").click();
         await page.locator("#loginCode").waitFor({ state: "visible" });
       } else if (mode === "dashboard" || mode === "dialog") {

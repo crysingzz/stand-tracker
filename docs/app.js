@@ -47,6 +47,20 @@ function clearSession() {
   catch { /* The in-memory session is still cleared. */ }
 }
 
+function rememberProfile(username) {
+  try { localStorage.setItem("stand-tracker-last-profile", username); }
+  catch { /* Remembering the non-secret profile is optional. */ }
+}
+
+function restoreProfile() {
+  try {
+    const username = localStorage.getItem("stand-tracker-last-profile");
+    if ([...$("#loginProfile").options].some((option) => option.value === username)) {
+      $("#loginProfile").value = username;
+    }
+  } catch { /* Browser storage may be disabled. */ }
+}
+
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
@@ -126,13 +140,12 @@ function showLogin(message = "Войдите через Telegram.") {
   $("#codeStep").hidden = true;
   $("#telegramBotLink").hidden = true;
   $("#telegramBotLink").removeAttribute("href");
-  $("#manualCommand").textContent = "";
   $("#loginCode").value = "";
   $("#beginLogin").hidden = !botUsername;
   $("#telegramRetry").hidden = true;
   setConnection("Нужен вход", "offline");
   render();
-  if (botUsername) $("#beginLogin").focus();
+  if (botUsername) $("#loginProfile").focus();
   if (!botUsername && configured && !initializing) void initialize(message);
 }
 
@@ -359,56 +372,68 @@ function showTracker() {
 
 async function beginLogin() {
   if (beginningLogin || signingIn || sessionToken) return;
+  const username = $("#loginProfile").value;
+  if (!username) {
+    $("#loginProfile").reportValidity();
+    return;
+  }
   beginningLogin = true;
   const button = $("#beginLogin");
   button.disabled = true;
+  $("#loginProfile").disabled = true;
   $("#telegramRetry").disabled = true;
   $("#telegramError").textContent = "";
-  $("#telegramStatus").textContent = "Готовим одноразовую ссылку…";
+  $("#telegramStatus").textContent = "Отправляем код в Telegram…";
   try {
-    const challenge = await telegramApi("begin-login", {}, false);
+    const challenge = await telegramApi("request-code", { username }, false);
     if (sessionToken) return;
+    if ($("#loginProfile").value !== username) return;
     if (!/^[A-Za-z0-9_-]{43}$/.test(challenge.startToken) ||
-        !/^[A-Za-z0-9_-]{43}$/.test(challenge.browserToken) ||
-        challenge.startLink !== `https://t.me/${botUsername}?start=${challenge.startToken}`) throw new Error("Сервер вернул неверную ссылку");
+        !/^[A-Za-z0-9_-]{43}$/.test(challenge.browserToken)) throw new Error("Сервер вернул неполный запрос на вход");
     loginChallenge = challenge;
-    $("#telegramBotLink").href = `tg://resolve?domain=${botUsername}&start=${challenge.startToken}`;
+    $("#telegramBotLink").href = `tg://resolve?domain=${botUsername}`;
     $("#telegramBotLink").hidden = false;
     $("#manualBotName").textContent = `@${botUsername}`;
-    $("#manualCommand").textContent = `/start ${challenge.startToken}`;
     $("#codeStep").hidden = false;
     $("#telegramRetry").hidden = false;
-    $("#telegramRetry").textContent = "Запросить новую ссылку";
+    $("#telegramRetry").textContent = "Отправить код ещё раз";
     $("#beginLogin").hidden = true;
     $("#loginCode").value = "";
-    $("#telegramStatus").textContent = "Откройте приложение Telegram, нажмите Start в чате бота и введите код из личного сообщения.";
-    $("#telegramBotLink").focus();
+    $("#telegramStatus").textContent = "Проверьте чат с ботом. Если кода нет, откройте бота ниже.";
+    $("#loginCode").focus();
   } catch (error) {
     $("#telegramStatus").textContent = loginChallenge
-      ? "Новую ссылку создать не удалось. Пока можно использовать предыдущую."
-      : "Не удалось подготовить вход.";
+      ? "Новый код отправить не удалось. Пока можно использовать предыдущий."
+      : "Не удалось отправить код.";
     $("#telegramError").textContent = errorMessage(error);
   } finally {
     button.disabled = false;
+    $("#loginProfile").disabled = false;
     $("#telegramRetry").disabled = false;
     beginningLogin = false;
   }
 }
 
-$("#beginLogin").addEventListener("click", beginLogin);
-$("#copyCommand").addEventListener("click", async () => {
-  try {
-    await navigator.clipboard.writeText($("#manualCommand").textContent);
-    showToast("Команда скопирована. Отправьте её в личный чат бота.");
-  } catch {
-    showToast("Не удалось скопировать автоматически. Выделите команду вручную.");
-  }
+$("#requestCodeForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  void beginLogin();
+});
+$("#loginProfile").addEventListener("change", () => {
+  loginChallenge = null;
+  $("#codeStep").hidden = true;
+  $("#telegramBotLink").hidden = true;
+  $("#telegramRetry").hidden = true;
+  $("#beginLogin").hidden = !botUsername;
+  $("#loginCode").value = "";
+  $("#telegramError").textContent = "";
+  $("#telegramStatus").textContent = "Код пока не запрошен.";
 });
 $("#codeForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!loginChallenge || signingIn) return;
   signingIn = true;
   $("#submitCode").disabled = true;
+  $("#loginProfile").disabled = true;
   $("#telegramRetry").disabled = true;
   $("#telegramError").textContent = "";
   try {
@@ -424,9 +449,9 @@ $("#codeForm").addEventListener("submit", async (event) => {
     sessionToken = result.sessionToken;
     profile = result.profile;
     const persisted = saveSession(sessionToken);
+    rememberProfile(result.profile.username);
     loginChallenge = null;
     $("#loginCode").value = "";
-    $("#manualCommand").textContent = "";
     try {
       applyState(await telegramApi("state"));
       showTracker();
@@ -445,6 +470,7 @@ $("#codeForm").addEventListener("submit", async (event) => {
   } finally {
     signingIn = false;
     $("#submitCode").disabled = false;
+    $("#loginProfile").disabled = false;
     $("#telegramRetry").disabled = false;
   }
 });
@@ -505,11 +531,12 @@ async function initialize(loginMessage = "") {
       }
       if (telegramConfig?.enabled && /^[A-Za-z0-9_]{5,32}$/.test(telegramConfig.botUsername)) {
         botUsername = telegramConfig.botUsername;
-        $("#telegramStatus").textContent = loginMessage || "Нажмите кнопку, чтобы получить код в Telegram.";
+        restoreProfile();
+        $("#telegramStatus").textContent = loginMessage || "Код пока не запрошен.";
         $("#beginLogin").hidden = false;
         $("#telegramRetry").hidden = true;
         setConnection("Нужен вход", "offline");
-        $("#beginLogin").focus();
+        $("#loginProfile").focus();
         return;
       }
     } catch { /* No insecure fallback. */ }
